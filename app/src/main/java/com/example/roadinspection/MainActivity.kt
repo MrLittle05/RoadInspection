@@ -3,6 +3,7 @@ package com.example.roadinspection
 import android.Manifest
 import android.annotation.SuppressLint
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.ScaleGestureDetector
@@ -10,6 +11,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -18,8 +20,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -57,7 +58,7 @@ class MainActivity : ComponentActivity() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // 底层：相机预览
                     CameraPreview()
-                    
+
                     // 顶层：WebView UI
                     WebViewScreen()
                 }
@@ -85,7 +86,7 @@ fun CameraPreview() {
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 // 保持比例填充，可能会裁剪边缘，但不会变形
-                scaleType = PreviewView.ScaleType.FILL_CENTER 
+                scaleType = PreviewView.ScaleType.FILL_CENTER
             }
         },
         update = { previewView ->
@@ -98,7 +99,7 @@ fun CameraPreview() {
             try {
                 // 解绑所有用例
                 cameraProvider.unbindAll()
-                
+
                 // 绑定生命周期
                 val camera = cameraProvider.bindToLifecycle(
                     lifecycleOwner,
@@ -107,7 +108,8 @@ fun CameraPreview() {
                 )
 
                 // --- 实现双指缩放逻辑 ---
-                val scaleGestureDetector = ScaleGestureDetector(context,
+                val scaleGestureDetector = ScaleGestureDetector(
+                    context,
                     object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                         override fun onScale(detector: ScaleGestureDetector): Boolean {
                             val zoomState = camera.cameraInfo.zoomState.value
@@ -141,25 +143,41 @@ fun CameraPreview() {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebViewScreen() {
+    var webView: WebView? by remember { mutableStateOf(null) }
+
+    val selectImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        // 将选择的图片 URI 发送给 WebView
+        uri?.let {
+            val script = "onImageSelected('$it')"
+            webView?.post {
+                webView?.evaluateJavascript(script, null)
+            }
+        }
+    }
+
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
             WebView(context).apply {
                 // 1. 核心设置：背景透明
                 setBackgroundColor(Color.TRANSPARENT)
-                
+
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
 
                 // 注入接口
-                addJavascriptInterface(WebAppInterface(context), "AndroidNative")
+                addJavascriptInterface(WebAppInterface(context, selectImageLauncher), "AndroidNative")
 
                 webViewClient = WebViewClient()
 
                 // 加载本地页面
                 loadUrl("file:///android_asset/camera.html")
+            }.also {
+                webView = it
             }
         }
     )

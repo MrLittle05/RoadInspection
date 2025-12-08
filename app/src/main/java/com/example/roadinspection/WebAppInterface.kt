@@ -3,12 +3,16 @@ package com.example.roadinspection
 import android.content.Context
 import android.webkit.JavascriptInterface
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
 
 /**
  * 对应文档 "3. 接口定义：JS -> Java"
  * 此类的方法将被注入到 window.AndroidNative 对象中
  */
-class WebAppInterface(private val context: Context) {
+class WebAppInterface(
+    private val context: Context,
+    private val selectImageLauncher: ActivityResultLauncher<String>
+) {
 
     @JavascriptInterface
     fun startInspection() {
@@ -26,6 +30,11 @@ class WebAppInterface(private val context: Context) {
     fun manualCapture() {
         showToast("正在抓拍...")
         // TODO: 调用相机 API
+    }
+
+    @JavascriptInterface
+    fun selectImage() {
+        selectImageLauncher.launch("image/*")
     }
 
     @JavascriptInterface
