@@ -5,12 +5,28 @@ let timerInterval = null;
 let recordSeconds = 0;
 
 const dataUI = {
-  timer: document.getElementById("timer"),
-  totalDistance: document.getElementById("total-dist"),
-  gpsAndTime: document.getElementById("gps-raw"),
-  gpsLevel: document.getElementById("gps-accuracy"),
-  netLevel: document.getElementById("net-strength"),
+  timer: null,
+  totalDistance: null,
+  gps: null,
+  time: null,
+  gpsLevel: null,
+  netLevel: null,
 };
+
+document.addEventListener("DOMContentLoaded", () => {
+  (dataUI.timer = document.getElementById("timer")),
+    (dataUI.totalDistance = document.getElementById("total-dist")),
+    (dataUI.gps = document.getElementById("gps-raw")),
+    (dataUI.time = document.getElementById("time")),
+    (dataUI.gpsLevel = document.getElementById("gps-accuracy")),
+    (dataUI.netLevel = document.getElementById("net-strength"));
+
+  // 初始化并在每秒更新时间
+  updateTime(null);
+  setInterval(() => {
+    updateTime(null);
+  }, 1000);
+});
 
 // Mock 接口 (用于浏览器调试)
 if (!window.AndroidNative) {
@@ -124,6 +140,29 @@ function toggleDisplayInfo() {
     : textInfoDiv.classList.add("info-hidden");
 }
 
+function updateTime(data) {
+  // 增加对 data 是否存在的检查，防止 null.timestamp 报错
+  const dateObj = new Date(
+    data && data.timestamp && data.timestamp > 0 ? data.timestamp : Date.now()
+  );
+
+  const dateStr =
+    dateObj.getFullYear() +
+    "/" +
+    String(dateObj.getMonth() + 1).padStart(2, "0") +
+    "/" +
+    String(dateObj.getDate()).padStart(2, "0");
+
+  const timeStr =
+    String(dateObj.getHours()).padStart(2, "0") +
+    ":" +
+    String(dateObj.getMinutes()).padStart(2, "0") +
+    ":" +
+    String(dateObj.getSeconds()).padStart(2, "0");
+
+  dataUI.time.innerText = `${dateStr}  ${timeStr}`;
+}
+
 // === Native 回调接口 (window.JSBridge) ===
 
 window.JSBridge = {
@@ -139,31 +178,15 @@ window.JSBridge = {
       // 传入 { lat: 31.230416, lng: 121.473701, timestamp: 1715000000000 }
 
       // 时间 (优先用 GPS 时间)
-      const dateObj = new Date(
-        data.timestamp && data.timestamp > 0 ? data.timestamp : Date.now()
-      );
-
-      const dateStr =
-        dateObj.getFullYear() +
-        "/" +
-        String(dateObj.getMonth() + 1).padStart(2, "0") +
-        "/" +
-        String(dateObj.getDate()).padStart(2, "0");
-
-      const timeStr =
-        String(dateObj.getHours()).padStart(2, "0") +
-        ":" +
-        String(dateObj.getMinutes()).padStart(2, "0") +
-        ":" +
-        String(dateObj.getSeconds()).padStart(2, "0");
+      updateTime(data);
 
       // 经纬度
       // 建议保留 6 位小数 (精度~1米以内)，不够补0
       const latStr = (data.lat || 0).toFixed(6);
       const lonStr = (data.lon || data.lng || 0).toFixed(6); // 兼容 lon 或 lng 字段名
 
-      // 显示: N:31.230416 E:121.473701 2025/05/06 12:12:12
-      dataUI.gpsAndTime.innerText = `N:${latStr}  E:${lonStr}  ${dateStr} ${timeStr}`;
+      // 显示: N:31.230416 E:121.473701
+      dataUI.gps.innerText = `N:${latStr}  E:${lonStr}`;
 
       // GPS信号强度
       const gpsLevel = data.gpsLevel || 999;

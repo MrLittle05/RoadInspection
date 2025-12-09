@@ -13,32 +13,7 @@
     <div class="layout-root">
       <!-- 顶部信息区 -->
       <div class="panel-top">
-        <!-- 左侧：信息图标 + 详情 -->
-        <div class="tl-group">
-          <div class="btn-square wave-btn" onclick="toggleDisplayInfo()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-              <path
-                d="M2 12c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2zM2 6c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2z"
-              />
-            </svg>
-          </div>
-        </div>
-
-        <!-- 中间：距离 -->
-        <div class="distance-display">
-          <div class="dist-val-row">
-            <span
-              style="font-size: 20px; font-weight: bold; color: #fff"
-              id="total-dist"
-              >0.000</span
-            >
-            <span style="font-size: 12px; color: #ddd; margin-left: 2px"
-              >KM</span
-            >
-          </div>
-        </div>
-
-        <!-- 右侧：信号 -->
+        <!-- 左侧：信号 -->
         <div class="signal-display">
           <div class="sig-row">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="white">
@@ -57,10 +32,36 @@
             <span id="net-strength">--</span>
           </div>
         </div>
+
+        <!-- 中间：距离 -->
+        <div class="distance-display">
+          <div class="dist-val-row">
+            <span
+              style="font-size: 20px; font-weight: bold; color: #fff"
+              id="total-dist"
+              >0.000</span
+            >
+            <span style="font-size: 12px; color: #ddd; margin-left: 2px"
+              >KM</span
+            >
+          </div>
+        </div>
+
+        <!-- 右侧：信息图标 + 详情 -->
+        <div class="tl-group">
+          <div class="btn-square wave-btn" onclick="toggleDisplayInfo()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+              <path
+                d="M2 12c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2zM2 6c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2z"
+              />
+            </svg>
+          </div>
+        </div>
       </div>
 
       <div class="text-info info-hidden">
-        <div id="gps-raw">N:000 E:000 2024/--/-- --:--</div>
+        <div id="time">2025/--/-- --:--</div>
+        <div id="gps-raw">N:000 E:000</div>
         <div id="address">定位初始化中...</div>
       </div>
 
