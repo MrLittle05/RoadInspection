@@ -11,6 +11,7 @@ const dataUI = {
   time: null,
   gpsLevel: null,
   netLevel: null,
+  lastPhoto: null,
   timeOffset: 0,
 };
 
@@ -20,10 +21,12 @@ document.addEventListener("DOMContentLoaded", () => {
     (dataUI.gps = document.getElementById("gps-raw")),
     (dataUI.time = document.getElementById("time")),
     (dataUI.gpsLevel = document.getElementById("gps-accuracy")),
-    (dataUI.netLevel = document.getElementById("net-strength"));
+    (dataUI.netLevel = document.getElementById("net-strength")),
+    (dataUI.lastPhoto = document.getElementById("last-photo"));
 
   // 初始化并在每秒更新时间
-  updateTime(null);
+  initState();
+
   setInterval(() => {
     updateTime();
   }, 1000);
@@ -65,11 +68,9 @@ function switchMode(mode) {
 // 点击快门
 function handleShutter() {
   if (currentMode === "photo") {
-    // 拍照模式：直接触发一次抓拍
     window.AndroidNative.manualCapture();
     animateShutter();
   } else {
-    // 视频模式：开始/停止 巡检
     if (!isRecording) {
       startRecording();
     } else {
@@ -79,9 +80,17 @@ function handleShutter() {
 }
 
 function animateShutter() {
-  const btn = document.querySelector(".shutter-outer");
-  btn.style.transform = "scale(0.9)";
+  const btn = document.querySelector(".shutter-inner");
+  btn.style.transform = "scale(0.5)";
   setTimeout(() => (btn.style.transform = "scale(1)"), 100);
+
+  // 闪屏效果
+  const flash = document.createElement("div");
+  flash.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;height:100%;background:black;opacity:0.6;z-index:999;transition:opacity 0.2s;";
+  document.body.appendChild(flash);
+  setTimeout(() => (flash.style.opacity = 0), 50);
+  setTimeout(() => flash.remove(), 250);
 }
 
 function startRecording() {
@@ -168,7 +177,7 @@ function updateTime() {
 // === Native 回调接口 (window.JSBridge) ===
 
 window.JSBridge = {
-  // 1. 高频数据：位置、速度、时间、距离
+  // 1. 高频数据：距离、位置、时间差
   updateDashboard: function (jsonStr) {
     try {
       const data = JSON.parse(jsonStr);
@@ -219,18 +228,10 @@ window.JSBridge = {
   onPhotoTaken: function (jsonStr) {
     try {
       const data = JSON.parse(jsonStr);
-      const img = document.getElementById("last-photo");
+      const img = dataUI.lastPhoto;
       // 注意：前端加载本地文件通常需要 file:// 协议
       img.src = "file://" + data.filePath;
       img.style.display = "block";
-
-      // 闪屏效果
-      const flash = document.createElement("div");
-      flash.style.cssText =
-        "position:fixed;top:0;left:0;width:100%;height:100%;background:white;opacity:0.6;z-index:999;transition:opacity 0.2s;";
-      document.body.appendChild(flash);
-      setTimeout(() => (flash.style.opacity = 0), 50);
-      setTimeout(() => flash.remove(), 250);
     } catch (e) {
       console.error(e);
     }
