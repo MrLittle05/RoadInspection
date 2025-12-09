@@ -1,4 +1,4 @@
-package com.example.roadinspection
+package com.example.roadinspection.ui.screen.main
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.roadinspection.data.source.local.WebAppInterface
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 
 class MainActivity : ComponentActivity() {

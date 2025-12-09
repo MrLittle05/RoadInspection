@@ -1,4 +1,4 @@
-package com.example.roadinspection
+package com.example.roadinspection.data.source.local
 
 import android.content.Context
 import android.webkit.JavascriptInterface
