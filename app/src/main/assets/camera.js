@@ -11,6 +11,7 @@ const dataUI = {
   time: null,
   gpsLevel: null,
   netLevel: null,
+  timeOffset: 0,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -24,7 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 初始化并在每秒更新时间
   updateTime(null);
   setInterval(() => {
-    updateTime(null);
+    updateTime();
   }, 1000);
 });
 
@@ -140,25 +141,26 @@ function toggleDisplayInfo() {
     : textInfoDiv.classList.add("info-hidden");
 }
 
-function updateTime(data) {
-  // 增加对 data 是否存在的检查，防止 null.timestamp 报错
-  const dateObj = new Date(
-    data && data.timestamp && data.timestamp > 0 ? data.timestamp : Date.now()
-  );
+function updateTime() {
+  // 核心逻辑：当前系统时间 + 偏差值 = 真实的 GPS 时间
+  // 如果没有 GPS 信号，timeOffset 为 0，则显示系统时间
+  const currentTimestamp = Date.now() + dataUI.timeOffset;
+
+  const curTime = new Date(currentTimestamp);
 
   const dateStr =
-    dateObj.getFullYear() +
+    curTime.getFullYear() +
     "/" +
-    String(dateObj.getMonth() + 1).padStart(2, "0") +
+    String(curTime.getMonth() + 1).padStart(2, "0") +
     "/" +
-    String(dateObj.getDate()).padStart(2, "0");
+    String(curTime.getDate()).padStart(2, "0");
 
   const timeStr =
-    String(dateObj.getHours()).padStart(2, "0") +
+    String(curTime.getHours()).padStart(2, "0") +
     ":" +
-    String(dateObj.getMinutes()).padStart(2, "0") +
+    String(curTime.getMinutes()).padStart(2, "0") +
     ":" +
-    String(dateObj.getSeconds()).padStart(2, "0");
+    String(curTime.getSeconds()).padStart(2, "0");
 
   dataUI.time.innerText = `${dateStr}  ${timeStr}`;
 }
@@ -166,6 +168,7 @@ function updateTime(data) {
 // === Native 回调接口 (window.JSBridge) ===
 
 window.JSBridge = {
+  // 1. 高频数据：位置、速度、时间、距离
   updateDashboard: function (jsonStr) {
     try {
       const data = JSON.parse(jsonStr);
@@ -174,11 +177,13 @@ window.JSBridge = {
         dataUI.totalDistance.innerText = (data.totalDistance / 1000).toFixed(3);
       }
 
-      // 顶部信息: 纬度 + 纬度 + 时间  (YY/MM/DD HH:MM:SS)
-      // 传入 { lat: 31.230416, lng: 121.473701, timestamp: 1715000000000 }
-
-      // 时间 (优先用 GPS 时间)
-      updateTime(data);
+      // Native 端需计算：diff = location.getTime() - System.currentTimeMillis()
+      // 如果 Native 传了 timeDiff，更新本地的偏差值
+      // 让 setInterval 里的 updateTime() 自动读取最新的 timeOffset 进行渲染。
+      // 这样既平滑，又准。
+      if (data.timeDiff !== undefined && data.timeDiff !== null) {
+        dataUI.timeOffset = data.timeDiff;
+      }
 
       // 经纬度
       // 建议保留 6 位小数 (精度~1米以内)，不够补0
@@ -187,43 +192,30 @@ window.JSBridge = {
 
       // 显示: N:31.230416 E:121.473701
       dataUI.gps.innerText = `N:${latStr}  E:${lonStr}`;
-
-      // GPS信号强度
-      const gpsLevel = data.gpsLevel || 999;
-      dataUI.gpsLevel.innerText =
-        gpsLevel === 4
-          ? "强"
-          : gpsLevel === 3
-          ? "较强"
-          : gpsLevel === 2
-          ? "较弱"
-          : gpsLevel === 1
-          ? "弱"
-          : "无";
-
-      // 网络信号强度
-      const netLevel = data.netLevel || 999;
-      dataUI.netLevel.innerText =
-        netLevel === 4
-          ? "强"
-          : netLevel === 3
-          ? "较强"
-          : netLevel === 2
-          ? "较弱"
-          : netLevel === 1
-          ? "弱"
-          : "无";
     } catch (e) {
       console.error("Data parse error", e);
     }
   },
 
-  // 2. 更新地址文字
+  updateGpsSignal: function (gpsLevel) {
+    // level 建议直接传数字，不需要 JSON.parse，效率更高
+    // 0=无, 1=弱, 2=较弱, 3=较强, 4=强
+    const text = ["无", "弱", "较弱", "较强", "强"][gpsLevel] || "无";
+    dataUI.gpsLevel.innerText = text;
+  },
+
+  updateNetSignal: function (netLevel) {
+    // level: 0-4
+    const text = ["无", "弱", "较弱", "较强", "强"][netLevel] || "无";
+    dataUI.netLevel.innerText = text;
+  },
+
+  // 3. 更新地址文字 (低频，通常几秒一次或位置显著变化时)
   updateAddress: function (addr) {
     document.getElementById("address").innerText = addr;
   },
 
-  // 3. 拍照成功回调
+  // 4. 拍照成功回调
   onPhotoTaken: function (jsonStr) {
     try {
       const data = JSON.parse(jsonStr);
