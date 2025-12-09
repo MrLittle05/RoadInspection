@@ -1,45 +1,26 @@
 package com.example.roadinspection.data.source.local
 
-import android.content.Context
 import android.webkit.JavascriptInterface
-import android.widget.Toast
-import androidx.activity.result.ActivityResultLauncher
 
 /**
- * 对应文档 "3. 接口定义：JS -> Java"
- * 此类的方法将被注入到 window.AndroidNative 对象中
+ * 定义了暴露给 WebView 的所有原生方法的契约 (Interface)。
+ * JavaScript 端可以通过 window.AndroidNative 调用这些方法。
+ * 这个接口只定义了“能做什么”，而不关心“如何做”。
  */
-class WebAppInterface(
-    private val context: Context,
-    private val selectImageLauncher: ActivityResultLauncher<String>
-) {
+interface WebAppInterface {
 
     @JavascriptInterface
-    fun startInspection() {
-        showToast("开始巡检：Native 收到指令")
-        // TODO: 启动 GPS 监听服务
-    }
+    fun startInspection()
 
     @JavascriptInterface
-    fun stopInspection() {
-        showToast("停止巡检：数据已保存")
-        // TODO: 停止服务，保存数据库
-    }
+    fun stopInspection()
 
     @JavascriptInterface
-    fun manualCapture() {
-        showToast("正在抓拍...")
-        // TODO: 调用相机 API
-    }
+    fun manualCapture()
 
     @JavascriptInterface
-    fun selectImage() {
-        selectImageLauncher.launch("image/*")
-    }
+    fun selectImage()
 
     @JavascriptInterface
-    fun showToast(msg: String) {
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-    }
-
+    fun showToast(msg: String)
 }

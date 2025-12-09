@@ -25,7 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.roadinspection.data.source.local.WebAppInterface
+import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 
 class MainActivity : ComponentActivity() {
@@ -171,7 +171,7 @@ fun WebViewScreen() {
                 settings.allowContentAccess = true
 
                 // 注入接口
-                addJavascriptInterface(WebAppInterface(context, selectImageLauncher), "AndroidNative")
+                addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
 
                 webViewClient = WebViewClient()
 
