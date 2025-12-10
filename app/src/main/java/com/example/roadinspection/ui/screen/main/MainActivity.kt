@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.ui.theme.GreetingCardTheme
+import com.example.roadinspection.util.DashboardUpdater
 
 class MainActivity : ComponentActivity() {
 
@@ -145,6 +146,7 @@ fun CameraPreview() {
 @Composable
 fun WebViewScreen() {
     var webView: WebView? by remember { mutableStateOf(null) }
+    var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
 
     val selectImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -155,6 +157,18 @@ fun WebViewScreen() {
             webView?.post {
                 webView?.evaluateJavascript(script, null)
             }
+        }
+    }
+
+    // 当 webView 实例创建或销毁时，这个 effect 会被调用
+    DisposableEffect(webView) {
+        // 当 webView 可用时，创建并启动 updater
+        webView?.let {
+            dashboardUpdater = DashboardUpdater(it).apply { start() }
+        }
+        onDispose {
+            // 当 composable 离开屏幕时，停止 updater 以防止内存泄漏
+            dashboardUpdater?.stop()
         }
     }
 
@@ -173,7 +187,13 @@ fun WebViewScreen() {
                 // 注入接口
                 addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
 
-                webViewClient = WebViewClient()
+                webViewClient = object: WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        // 页面加载完成后，可以启动数据更新器
+                        dashboardUpdater?.start()
+                    }
+                }
 
                 // 加载本地页面
                 loadUrl("file:///android_asset/camera.html")
