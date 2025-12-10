@@ -25,7 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
     (dataUI.lastPhoto = document.getElementById("last-photo"));
 
   // 初始化并在每秒更新时间
-  initState();
+  // initState();
 
   setInterval(() => {
     updateTime();
@@ -56,11 +56,13 @@ function switchMode(mode) {
     .forEach((el) => el.classList.remove("active"));
   document.getElementById("mode-" + mode).classList.add("active");
 
-  // 更新快门样式
+  // 更新快门样式; 切换是否显示计时器
   const inner = document.getElementById("shutter-btn");
   if (mode === "photo") {
+    dataUI.timer.classList.add("hidden");
     inner.classList.add("photo-mode");
   } else {
+    dataUI.timer.classList.remove("hidden");
     inner.classList.remove("photo-mode");
   }
 }
@@ -96,6 +98,9 @@ function animateShutter() {
 function startRecording() {
   isRecording = true;
   document.getElementById("shutter-btn").classList.add("recording");
+  if (dataUI.timer) {
+    dataUI.timer.classList.add("active");
+  }
   window.AndroidNative.startInspection();
 
   // 启动计时器
@@ -110,8 +115,12 @@ function startRecording() {
 function stopRecording() {
   isRecording = false;
   document.getElementById("shutter-btn").classList.remove("recording");
+  if (dataUI.timer) {
+    dataUI.timer.classList.remove("active");
+  }
   window.AndroidNative.stopInspection();
-
+  recordSeconds = 0;
+  updateTimerUI();
   clearInterval(timerInterval);
 }
 

@@ -128,17 +128,30 @@ body {
 
 /* 计时器 (红色录制时显示的) */
 .center-timer {
+  display: block;
   position: absolute;
-  top: 90px;
+  top: 80px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(255, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.3);
   color: white;
-  padding: 4px 10px;
-  border-radius: 4px;
+  font-weight: bold;
+  padding: 4px 5px;
+  border-radius: 3px;
   font-family: monospace;
   font-size: 16px;
   z-index: 5;
+  transition: all 0.3s ease-in-out;
+}
+
+.center-timer.hidden {
+  background: transparent;
+  color: transparent;
+}
+
+.center-timer.active {
+  display: block;
+  background: #ff3b30;
 }
 
 /* 变焦按钮 (1x / 0.5x) - 悬浮在模式切换上方 */
