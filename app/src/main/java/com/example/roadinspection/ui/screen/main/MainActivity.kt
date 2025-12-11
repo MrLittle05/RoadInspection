@@ -26,21 +26,31 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
+import com.example.roadinspection.domain.location.LocationProvider
+import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.util.DashboardUpdater
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var locationProvider: LocationProvider
+    private lateinit var networkStatusProvider: NetworkStatusProvider
+
     // 权限请求启动器
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        // 这里可以处理权限被拒绝的情况，暂且假设用户都会同意
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            locationProvider.startLocationUpdates()
+        }
         Log.d("Permissions", "Permissions granted: $permissions")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        locationProvider = LocationProvider(this)
+        networkStatusProvider = NetworkStatusProvider(this)
 
         // 1. 启动时立即请求所有必要权限
         requestPermissionLauncher.launch(
@@ -50,29 +60,22 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.RECORD_AUDIO // 如果要录像的话
+                Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
+                Manifest.permission.RECORD_AUDIO
             )
         )
 
         setContent {
             GreetingCardTheme {
-                // 2. 使用 Box 进行图层叠加
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // 底层：相机预览
                     CameraPreview()
-
-                    // 顶层：WebView UI
-                    WebViewScreen()
+                    WebViewScreen(locationProvider, networkStatusProvider)
                 }
             }
         }
     }
 }
 
-/**
- * 相机预览组件 (底层)
- * 支持双指缩放
- */
 @Composable
 fun CameraPreview() {
     val context = LocalContext.current
@@ -83,11 +86,7 @@ fun CameraPreview() {
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             PreviewView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                // 保持比例填充，可能会裁剪边缘，但不会变形
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
         },
@@ -99,38 +98,21 @@ fun CameraPreview() {
             preview.setSurfaceProvider(previewView.surfaceProvider)
 
             try {
-                // 解绑所有用例
                 cameraProvider.unbindAll()
-
-                // 绑定生命周期
-                val camera = cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    preview
-                )
-
-                // --- 实现双指缩放逻辑 ---
-                val scaleGestureDetector = ScaleGestureDetector(
-                    context,
-                    object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                        override fun onScale(detector: ScaleGestureDetector): Boolean {
-                            val zoomState = camera.cameraInfo.zoomState.value
-                            val currentZoomRatio = zoomState?.zoomRatio ?: 1f
-                            val delta = detector.scaleFactor
-                            camera.cameraControl.setZoomRatio(currentZoomRatio * delta)
-                            return true
-                        }
+                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    override fun onScale(detector: ScaleGestureDetector): Boolean {
+                        val zoomState = camera.cameraInfo.zoomState.value
+                        val currentZoomRatio = zoomState?.zoomRatio ?: 1f
+                        val delta = detector.scaleFactor
+                        camera.cameraControl.setZoomRatio(currentZoomRatio * delta)
+                        return true
                     }
-                )
-
-                // 将触摸事件传递给 ScaleGestureDetector
-                // 注意：由于 WebView 在上层，这里的触摸事件可能会被 WebView 拦截
-                // 如果 WebView 区域也是全屏的，需要前端配合处理事件穿透或在 WebView 上监听
+                })
                 previewView.setOnTouchListener { _, event ->
                     scaleGestureDetector.onTouchEvent(event)
                     true
                 }
-
             } catch (exc: Exception) {
                 Log.e("CameraPreview", "相机绑定失败", exc)
             }
@@ -138,20 +120,13 @@ fun CameraPreview() {
     )
 }
 
-/**
- * WebView UI 组件 (顶层)
- * 背景透明，只负责显示悬浮按钮和信息
- */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebViewScreen() {
+fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
 
-    val selectImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        // 将选择的图片 URI 发送给 WebView
+    val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             val script = "onImageSelected('$it')"
             webView?.post {
@@ -160,14 +135,11 @@ fun WebViewScreen() {
         }
     }
 
-    // 当 webView 实例创建或销毁时，这个 effect 会被调用
     DisposableEffect(webView) {
-        // 当 webView 可用时，创建并启动 updater
         webView?.let {
-            dashboardUpdater = DashboardUpdater(it).apply { start() }
+            dashboardUpdater = DashboardUpdater(it, locationProvider, networkStatusProvider).apply { start() }
         }
         onDispose {
-            // 当 composable 离开屏幕时，停止 updater 以防止内存泄漏
             dashboardUpdater?.stop()
         }
     }
@@ -176,26 +148,18 @@ fun WebViewScreen() {
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
             WebView(context).apply {
-                // 1. 核心设置：背景透明
                 setBackgroundColor(Color.TRANSPARENT)
-
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
-
-                // 注入接口
                 addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
-
                 webViewClient = object: WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        // 页面加载完成后，可以启动数据更新器
                         dashboardUpdater?.start()
                     }
                 }
-
-                // 加载本地页面
                 loadUrl("file:///android_asset/camera.html")
             }.also {
                 webView = it
