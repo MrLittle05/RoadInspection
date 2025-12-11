@@ -13,10 +13,10 @@
     <div class="layout-root">
       <!-- 顶部信息区 -->
       <div class="panel-top">
-        <!-- 左侧：信号 -->
-        <div class="signal-display">
+        <!-- 左侧：信号 (需旋转) -->
+        <div class="signal-display rotatable">
           <div class="sig-row">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="white">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
               <path
                 d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"
               />
@@ -24,7 +24,7 @@
             <span id="gps-accuracy">--</span>
           </div>
           <div class="sig-row">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="white">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
               <path
                 d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
               />
@@ -47,9 +47,12 @@
           </div>
         </div>
 
-        <!-- 右侧：信息图标 + 详情 -->
+        <!-- 右侧：信息图标 + 详情 (需旋转) -->
         <div class="tl-group">
-          <div class="btn-square wave-btn" onclick="toggleDisplayInfo()">
+          <div
+            class="btn-square wave-btn rotatable"
+            onclick="toggleDisplayInfo()"
+          >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
               <path
                 d="M2 12c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2zM2 6c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2z"
@@ -61,26 +64,32 @@
 
       <div class="text-info info-hidden">
         <div id="time">2025/--/-- --:--</div>
-        <div id="gps-raw">N:000 E:000</div>
+        <div id="gps-raw">N:0 E:0</div>
         <div id="address">定位初始化中...</div>
       </div>
 
       <!-- 镜头顶部中间 顶部控制区下方：计时器 -->
       <div class="center-timer" id="timer">00:00:00</div>
 
-      <!-- 悬浮缩放按钮 在模式切换上方-->
+      <!-- 镜头缩放 在模式切换上方 (需旋转) -->
       <div class="zoom-floater">
-        <button class="zoom-btn active" onclick="setZoom(1)">1×</button>
-        <button class="zoom-btn" onclick="setZoom(0.5)">0.5</button>
+        <button class="zoom-btn active rotatable" onclick="setZoom(1)">
+          1×
+        </button>
+        <button class="zoom-btn rotatable" onclick="setZoom(0.5)">0.5</button>
       </div>
 
-      <!-- 模式切换 底部控制区上方 可以滑动调节 -->
+      <!-- 模式切换 底部控制区上方 可以滑动调节 (需旋转) -->
       <div class="mode-slider">
-        <div class="mode-item" id="mode-photo" onclick="switchMode('photo')">
+        <div
+          class="mode-item rotatable"
+          id="mode-photo"
+          onclick="switchMode('photo')"
+        >
           照片
         </div>
         <div
-          class="mode-item active"
+          class="mode-item active rotatable"
           id="mode-video"
           onclick="switchMode('video')"
         >
@@ -90,8 +99,8 @@
 
       <!-- 底部控制区 -->
       <div class="panel-bottom">
-        <!-- 左侧：相册 -->
-        <div class="gallery-thumb" onclick="openGallery()">
+        <!-- 左侧：相册 (需旋转) -->
+        <div class="gallery-thumb rotatable" onclick="openGallery()">
           <img id="last-photo" src="" alt="" />
           <!-- 默认图标 -->
           <div class="gallery-icon-overlay">
@@ -109,8 +118,8 @@
           <div class="shutter-inner" id="shutter-btn"></div>
         </div>
 
-        <!-- 右侧：AI 算法按钮 -->
-        <div class="ai-btn" onclick="toggleAI()">
+        <!-- 右侧：AI 算法按钮 (需旋转) -->
+        <div class="ai-btn rotatable" onclick="toggleAI()">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
             <path
               d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.9-2 2-2 .55 0 1-.45 1-1s-.45-1-1-1c-.55 0-1 .45-1 1H10c0-1.66 1.34-3 3-3s3 1.34 3 3c0 .55-.45 1.05-.93 1.5z"

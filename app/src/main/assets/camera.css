@@ -16,6 +16,10 @@ body {
   user-select: none;
 }
 
+.rotatable {
+  transition: transform 0.3s ease;
+}
+
 .layout-root {
   position: absolute;
   top: 0;
@@ -42,7 +46,7 @@ body {
   z-index: 10;
 }
 
-/* 左上：波浪按钮 + 文本信息 */
+/* 右上：波浪按钮 + 文本信息 */
 .tl-group {
   display: flex;
   align-items: center;
@@ -107,7 +111,7 @@ body {
   border-radius: 12px;
 }
 
-/* 右上：信号状态 */
+/* 左上：信号状态 */
 .signal-display {
   display: flex;
   flex-direction: column;

@@ -30,7 +30,45 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(() => {
     updateTime();
   }, 1000);
+
+  // 监听设备方向变化，用于旋转图标
+  window.addEventListener("deviceorientation", handleOrientation);
 });
+
+function handleOrientation(event) {
+  // 根据 beta (前后倾斜) 和 gamma (左右倾斜) 计算大致方向
+  // 简单起见，这里主要关注横竖屏切换
+  // Android Webview 中锁定竖屏后，window.orientation可能不会变，依赖 heavy sensor data
+  // 或者，我们可以依赖 Native 端通过 updateDashboard 传过来的 orientation 数据
+  // 但更通用的是使用 CSS 的 media query 或者简单的重力感应逻辑
+
+  // 这里是一个简单的逻辑：
+  // beta: [-180, 180], gamma: [-90, 90]
+  // 竖屏：beta ~90 (直立)
+  // 横屏左：gamma ~-90
+  // 横屏右：gamma ~90
+
+  let rotation = 0;
+  const beta = event.beta; // X轴旋转
+  const gamma = event.gamma; // Y轴旋转
+
+  // 简单的阈值判定
+  if (Math.abs(gamma) > 45) {
+    if (gamma > 0) {
+      rotation = -90; // 右横屏 (Home键在左) - 视具体设备而定，通常顺时针转90度
+    } else {
+      rotation = 90; // 左横屏 (Home键在右)
+    }
+  } else {
+    rotation = 0; // 竖屏
+  }
+
+  // 旋转需要旋转的元素
+  const rotatableElements = document.querySelectorAll(".rotatable");
+  rotatableElements.forEach((el) => {
+    el.style.transform = `rotate(${rotation}deg)`;
+  });
+}
 
 // Mock 接口 (用于浏览器调试)
 if (!window.AndroidNative) {
@@ -159,6 +197,36 @@ function toggleDisplayInfo() {
     : textInfoDiv.classList.add("info-hidden");
 }
 
+function updateTotalDistance(newTotalDistance) {
+  if (newTotalDistance !== undefined && newTotalDistance !== null) {
+    dataUI.totalDistance.innerText = (newTotalDistance / 1000).toFixed(3);
+  }
+}
+
+function updateTimeDifference(newTimeDiff) {
+  // Native 端需计算：diff = location.getTime() - System.currentTimeMillis()
+  // 如果 Native 传了 timeDiff，更新本地的偏差值
+  // 让 setInterval 里的 updateTime() 自动读取最新的 timeOffset 进行渲染。
+  // 这样既平滑，又准。
+  if (newTimeDiff !== undefined && newTimeDiff !== null) {
+    dataUI.timeOffset = newTimeDiff;
+  }
+}
+
+function updatePosition(newLat, newLng) {
+  // 保留 6 位小数 (精度~1米以内)，不够补0
+  const latDir = newLat ? (newLat > 0 ? "N" : "S") : "";
+
+  const latStr = (Math.abs(newLat) || 0).toFixed(6);
+
+  const lonDir = newLng ? (newLng > 0 ? "E" : "W") : "";
+
+  const lonStr = (Math.abs(newLng) || 0).toFixed(6);
+
+  // 显示: N:31.230416 E:121.473701
+  dataUI.gps.innerText = `${latDir}:${latStr}  ${lonDir}:${lonStr}`;
+}
+
 function updateTime() {
   // 核心逻辑：当前系统时间 + 偏差值 = 真实的 GPS 时间
   // 如果没有 GPS 信号，timeOffset 为 0，则显示系统时间
@@ -186,35 +254,16 @@ function updateTime() {
 // === Native 回调接口 (window.JSBridge) ===
 
 window.JSBridge = {
-  // 1. 高频数据：距离、位置、时间差
+  // 1. 更新高频数据：距离、位置、时间差
   updateDashboard: function (jsonStr) {
     try {
       const data = JSON.parse(jsonStr);
-      // 总距离
-      if (data.totalDistance !== undefined) {
-        dataUI.totalDistance.innerText = (data.totalDistance / 1000).toFixed(3);
-      }
 
-      // Native 端需计算：diff = location.getTime() - System.currentTimeMillis()
-      // 如果 Native 传了 timeDiff，更新本地的偏差值
-      // 让 setInterval 里的 updateTime() 自动读取最新的 timeOffset 进行渲染。
-      // 这样既平滑，又准。
-      if (data.timeDiff !== undefined && data.timeDiff !== null) {
-        dataUI.timeOffset = data.timeDiff;
-      }
+      updateTotalDistance(data.totalDistance);
 
-      // 经纬度
-      // 建议保留 6 位小数 (精度~1米以内)，不够补0
-      const latDir = data?.lat ? (data.lat > 0 ? "N" : "S") : "";
+      updateTimeDifference(data.timeDiff);
 
-      const latStr = (Math.abs(data.lat) || 0).toFixed(6);
-
-      const lonDir = data?.lng ? (data.lng > 0 ? "E" : "W") : "";
-
-      const lonStr = (Math.abs(data.lng) || 0).toFixed(6);
-
-      // 显示: N:31.230416 E:121.473701
-      dataUI.gps.innerText = `${latDir}:${latStr}  ${lonDir}:${lonStr}`;
+      updatePosition(data.lat, data.lng);
     } catch (e) {
       console.error("Data parse error", e);
     }
@@ -228,13 +277,12 @@ window.JSBridge = {
   },
 
   updateNetSignal: function (netLevel) {
-    // level: 0-4
     const text = ["无", "弱", "较弱", "较强", "强"][netLevel] || "无";
     dataUI.netLevel.innerText = text;
   },
 
-  // 3. 更新地址文字 (低频，通常几秒一次或位置显著变化时)
   updateAddress: function (addr) {
+    // 更新地址文字 (低频，通常几秒一次或位置显著变化时)
     document.getElementById("address").innerText = addr;
   },
 
