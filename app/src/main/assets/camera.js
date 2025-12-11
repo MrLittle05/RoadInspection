@@ -205,11 +205,16 @@ window.JSBridge = {
 
       // 经纬度
       // 建议保留 6 位小数 (精度~1米以内)，不够补0
-      const latStr = (data.lat || 0).toFixed(6);
-      const lonStr = (data.lon || data.lng || 0).toFixed(6); // 兼容 lon 或 lng 字段名
+      const latDir = data?.lat ? (data.lat > 0 ? "N" : "S") : "";
+
+      const latStr = (Math.abs(data.lat) || 0).toFixed(6);
+
+      const lonDir = data?.lng ? (data.lng > 0 ? "E" : "W") : "";
+
+      const lonStr = (Math.abs(data.lng) || 0).toFixed(6);
 
       // 显示: N:31.230416 E:121.473701
-      dataUI.gps.innerText = `N:${latStr}  E:${lonStr}`;
+      dataUI.gps.innerText = `${latDir}:${latStr}  ${lonDir}:${lonStr}`;
     } catch (e) {
       console.error("Data parse error", e);
     }
