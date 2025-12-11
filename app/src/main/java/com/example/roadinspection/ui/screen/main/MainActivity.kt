@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.ScaleGestureDetector
@@ -30,11 +31,13 @@ import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.util.DashboardUpdater
+import com.example.roadinspection.util.GPSSignalUpdater
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var locationProvider: LocationProvider
     private lateinit var networkStatusProvider: NetworkStatusProvider
+    private lateinit var gpsSignalUpdater: GPSSignalUpdater
 
     // 权限请求启动器
     private val requestPermissionLauncher = registerForActivityResult(
@@ -42,6 +45,9 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             locationProvider.startLocationUpdates()
+            if (::gpsSignalUpdater.isInitialized) {
+                gpsSignalUpdater.start()
+            }
         }
         Log.d("Permissions", "Permissions granted: $permissions")
     }
@@ -51,6 +57,9 @@ class MainActivity : ComponentActivity() {
 
         locationProvider = LocationProvider(this)
         networkStatusProvider = NetworkStatusProvider(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            gpsSignalUpdater = GPSSignalUpdater(this)
+        }
 
         // 1. 启动时立即请求所有必要权限
         requestPermissionLauncher.launch(
@@ -60,7 +69,7 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
+                Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.RECORD_AUDIO
             )
         )
@@ -69,7 +78,13 @@ class MainActivity : ComponentActivity() {
             GreetingCardTheme {
                 Box(modifier = Modifier.fillMaxSize()) {
                     CameraPreview()
-                    WebViewScreen(locationProvider, networkStatusProvider)
+                    // 确保只在 gpsSignalUpdater 初始化后才调用
+                    if (::gpsSignalUpdater.isInitialized) {
+                        WebViewScreen(locationProvider, networkStatusProvider, gpsSignalUpdater)
+                    } else {
+                        // 对于不支持 GnssStatus 的旧设备，可以提供一个不含 gpsUpdater 的版本
+                        // 为了简化，这里我们暂时只在支持的设备上显示 WebView
+                    }
                 }
             }
         }
@@ -122,7 +137,11 @@ fun CameraPreview() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider) {
+fun WebViewScreen(
+    locationProvider: LocationProvider,
+    networkStatusProvider: NetworkStatusProvider,
+    gpsSignalUpdater: GPSSignalUpdater
+) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
 
@@ -137,7 +156,7 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
 
     DisposableEffect(webView) {
         webView?.let {
-            dashboardUpdater = DashboardUpdater(it, locationProvider, networkStatusProvider).apply { start() }
+            dashboardUpdater = DashboardUpdater(it, locationProvider, gpsSignalUpdater, networkStatusProvider).apply { start() }
         }
         onDispose {
             dashboardUpdater?.stop()

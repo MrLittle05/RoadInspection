@@ -2,24 +2,24 @@ package com.example.roadinspection.util
 
 import android.location.Location
 import android.webkit.WebView
-import com.example.roadinspection.data.model.DashboardData
+import com.example.roadinspection.data.model.HighFrequencyData
 import com.example.roadinspection.domain.location.LocationProvider
-import com.example.roadinspection.domain.network.NetworkStatus
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.google.gson.Gson
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 /**
  * 负责持续向 WebView 更新仪表盘数据。
- * @param webView 需要接收数据的 WebView 实例。
- * @param locationProvider 位置数据提供者。
- * @param networkStatusProvider 网络状态提供者。
+ * 它现在通过不同的 JS 方法独立更新各类数据。
  */
 class DashboardUpdater(
     private val webView: WebView,
     private val locationProvider: LocationProvider,
+    private val gpsSignalUpdater: GPSSignalUpdater,
     private val networkStatusProvider: NetworkStatusProvider
 ) {
 
@@ -28,57 +28,57 @@ class DashboardUpdater(
     private val gson = Gson()
 
     /**
-     * 开始监听所有数据流并发送给 WebView。
+     * 启动所有独立的监听任务。
      */
     fun start() {
         stop()
         updateJob = scope.launch {
-            // 使用 combine 将多个 Flow 合并成一个
-            combine(
-                locationProvider.locationFlow,
-                locationProvider.gpsLevelFlow,
-                networkStatusProvider.networkStatusFlow
-            ) { location, gpsLevel, networkStatus ->
-                // 每当任何一个 flow 发出新数据，这里就会被调用
-                location?.let {
-                    // 1. 基于所有真实数据创建 DashboardData 对象
-                    val realData = createDashboardData(it, gpsLevel, networkStatus)
+            // 任务1：监听位置和距离，调用 updateDashboard
+            launch {
+                locationProvider.locationFlow.collect { location ->
+                    location?.let {
+                        val data = HighFrequencyData(
+                            lat = it.latitude,
+                            lng = it.longitude,
+                            timeDiff = it.time - System.currentTimeMillis()
+                        )
+                        val jsonData = gson.toJson(data)
+                        val script = "window.JSBridge.updateDashboard('$jsonData')"
+                        webView.evaluateJavascript(script, null)
+                    }
+                }
+            }
 
-                    // 2. 将数据对象转换为 JSON 字符串
-                    val jsonData = gson.toJson(realData)
-
-                    // 3. 构建并执行 JavaScript 调用
-                    val script = "window.JSBridge.updateDashboard('$jsonData')"
+            // 任务2：监听GPS信号，调用 updateGpsSignal
+            launch {
+                gpsSignalUpdater.gpsLevelFlow.collect { gpsLevel ->
+                    val script = "window.JSBridge.updateGpsSignal($gpsLevel)"
                     webView.evaluateJavascript(script, null)
                 }
-            }.collect() // 开始收集数据
+            }
+
+            // 任务3：监听网络信号，调用 updateNetSignal
+            launch {
+                networkStatusProvider.networkStatusFlow.collect { networkStatus ->
+                    val script = "window.JSBridge.updateNetSignal(${networkStatus.signalLevel})"
+                    webView.evaluateJavascript(script, null)
+                }
+            }
         }
-        // 启动位置监听 (网络监听是自动启动的)
+
+        // 启动所有需要手动启动的服务
         locationProvider.startLocationUpdates()
+        gpsSignalUpdater.start()
     }
 
     /**
-     * 停止发送数据并停止位置监听。
+     * 停止所有数据流的监听。
      */
     fun stop() {
-        updateJob?.cancel()
+        updateJob?.cancel() // 这会取消所有在其内部启动的子任务
         updateJob = null
-        // 停止位置监听以节省电量
+        // 停止所有服务以节省电量
         locationProvider.stopLocationUpdates()
-    }
-
-    // --- 私有辅助方法 ---
-
-    private fun createDashboardData(location: Location, gpsLevel: Int, networkStatus: NetworkStatus): DashboardData {
-        return DashboardData(
-            timeDiff = location.time - System.currentTimeMillis(),
-            lat = location.latitude,
-            lng = location.longitude,
-            netType = networkStatus.networkType,
-            netLevel = networkStatus.signalLevel,
-            gpsLevel = gpsLevel,
-//            totalDistance = 0.0, // TODO: 将来需要实现距离计算逻辑
-//            isInspecting = true  // TODO: 将来需要从巡检状态服务获取
-        )
+        gpsSignalUpdater.stop()
     }
 }
