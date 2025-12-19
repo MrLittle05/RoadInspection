@@ -153,6 +153,7 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
+                settings.allowFileAccessFromFileURLs = true;
                 addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
                 webViewClient = object: WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
