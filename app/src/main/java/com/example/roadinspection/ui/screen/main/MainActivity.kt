@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -67,9 +68,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GreetingCardTheme {
+                val imageCapture = remember { ImageCapture.Builder().build() }
+
                 Box(modifier = Modifier.fillMaxSize()) {
-                    CameraPreview()
-                    WebViewScreen(locationProvider, networkStatusProvider)
+                    CameraPreview(imageCapture)
+                    WebViewScreen(locationProvider, networkStatusProvider, imageCapture)
                 }
             }
         }
@@ -77,7 +80,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun CameraPreview() {
+fun CameraPreview(imageCapture: ImageCapture) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
@@ -99,7 +102,7 @@ fun CameraPreview() {
 
             try {
                 cameraProvider.unbindAll()
-                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
                 val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                     override fun onScale(detector: ScaleGestureDetector): Boolean {
                         val zoomState = camera.cameraInfo.zoomState.value
@@ -122,13 +125,13 @@ fun CameraPreview() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider) {
+fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider, imageCapture: ImageCapture) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
 
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
-            val script = "onImageSelected('$it')"
+            val script = "onImageSelected(\'$it\')"
             webView?.post {
                 webView?.evaluateJavascript(script, null)
             }
@@ -154,7 +157,6 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
                 settings.allowFileAccessFromFileURLs = true;
-                addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
                 webViewClient = object: WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
@@ -162,8 +164,18 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                     }
                 }
                 loadUrl("file:///android_asset/camera.html")
-            }.also {
-                webView = it
+            }.also { webview ->
+                webView = webview
+                // 在 WebView 初始化之后，定义回调并设置 JavaScript 接口
+                val onImageSavedCallback: (Uri) -> Unit = { uri ->
+                    // 我们需要在主线程上运行 evaluateJavascript
+                    // webView.post 能确保这一点
+                    val script = "updateLatestPhoto(\'$uri\')"
+                    webview.post {
+                        webview.evaluateJavascript(script, null)
+                    }
+                }
+                webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, imageCapture, onImageSavedCallback), "AndroidNative")
             }
         }
     )

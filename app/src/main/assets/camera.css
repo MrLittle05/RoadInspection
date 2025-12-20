@@ -283,7 +283,7 @@ body {
 }
 
 /* 当有图片时隐藏默认图标 */
-.gallery-thumb img[src^="file"] + .gallery-icon-overlay {
+.gallery-thumb img[src]:not([src=""]) + .gallery-icon-overlay {
   display: none;
 }
 

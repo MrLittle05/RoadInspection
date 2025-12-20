@@ -83,11 +83,16 @@ const UI = {
     elements.netLevel.innerText = text;
   },
 
-  onPhotoTaken: (data) => {
+  updateLatestPhoto: (uri) => {
     const img = elements.lastPhoto;
-    img.src = "file://" + data.filePath;
-    img.style.display = "block";
+    if (img) {
+      img.src = uri;
+      img.style.display = "block";
+    }
   },
 };
+
+// 将模块内的函数暴露到全局 window 对象上，以便原生代码可以调用
+window.updateLatestPhoto = UI.updateLatestPhoto;
 
 export default UI;
