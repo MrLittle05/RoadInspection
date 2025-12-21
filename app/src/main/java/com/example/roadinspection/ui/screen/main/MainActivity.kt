@@ -171,10 +171,7 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                         dashboardUpdater?.start()
                         // Find latest photo and update webview
                         getLatestPhotoUri(context)?.let { uri ->
-                            val script = "updateLatestPhoto(\'$uri\')"
-                            view?.post {
-                                view.evaluateJavascript(script, null)
-                            }
+                            displayLastestPhoto(uri, view)
                         }
                     }
                 }
@@ -183,12 +180,7 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 webView = webview
                 // 在 WebView 初始化之后，定义回调并设置 JavaScript 接口
                 val onImageSavedCallback: (Uri) -> Unit = { uri ->
-                    // 我们需要在主线程上运行 evaluateJavascript
-                    // webView.post 能确保这一点
-                    val script = "updateLatestPhoto(\'$uri\')"
-                    webview.post {
-                        webview.evaluateJavascript(script, null)
-                    }
+                    displayLastestPhoto(uri, webview)
                 }
                 webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, imageCapture, onImageSavedCallback), "AndroidNative")
             }
@@ -215,4 +207,13 @@ private fun getLatestPhotoUri(context: Context): Uri? {
         }
     }
     return null
+}
+
+private fun displayLastestPhoto(uri: Uri, webview: WebView?) {
+    // 我们需要在主线程上运行 evaluateJavascript
+    // webView.post 能确保这一点
+    val script = "updateLatestPhoto(\'$uri\')"
+    webview?.post {
+        webview.evaluateJavascript(script, null)
+    }
 }
