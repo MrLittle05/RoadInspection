@@ -85,8 +85,18 @@ class WebAppInterfaceImpl(
     }
 
     @JavascriptInterface
-    override fun selectImage() {
-        selectImageLauncher.launch("image/*")
+    override fun openGallery(type: String) {
+        when (type) {
+            "all" -> {
+                selectImageLauncher.launch("image/*")
+            }
+            "route" -> {
+                showToast("该功能暂未实现")
+            }
+            else -> {
+                showToast("未知的相册类型: $type")
+            }
+        }
     }
 
     @JavascriptInterface

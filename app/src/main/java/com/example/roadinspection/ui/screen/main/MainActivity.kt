@@ -2,9 +2,13 @@ package com.example.roadinspection.ui.screen.main
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ContentUris
+import android.content.Context
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
 import android.view.ScaleGestureDetector
 import android.view.ViewGroup
@@ -54,17 +58,21 @@ class MainActivity : ComponentActivity() {
         networkStatusProvider = NetworkStatusProvider(this)
 
         // 1. 启动时立即请求所有必要权限
-        requestPermissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
-                Manifest.permission.RECORD_AUDIO
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
+            Manifest.permission.RECORD_AUDIO
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        requestPermissionLauncher.launch(permissions.toTypedArray())
 
         setContent {
             GreetingCardTheme {
@@ -161,6 +169,13 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         dashboardUpdater?.start()
+                        // Find latest photo and update webview
+                        getLatestPhotoUri(context)?.let { uri ->
+                            val script = "updateLatestPhoto(\'$uri\')"
+                            view?.post {
+                                view.evaluateJavascript(script, null)
+                            }
+                        }
                     }
                 }
                 loadUrl("file:///android_asset/camera.html")
@@ -179,4 +194,25 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
             }
         }
     )
+}
+
+private fun getLatestPhotoUri(context: Context): Uri? {
+    val collection =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+    val projection = arrayOf(MediaStore.Images.Media._ID)
+    val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+    context.contentResolver.query(collection, projection, null, null, sortOrder)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val id = cursor.getLong(idColumn)
+            return ContentUris.withAppendedId(collection, id)
+        }
+    }
+    return null
 }

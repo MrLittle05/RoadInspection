@@ -19,7 +19,7 @@ interface WebAppInterface {
     fun manualCapture()
 
     @JavascriptInterface
-    fun selectImage()
+    fun openGallery(type: String)
 
     @JavascriptInterface
     fun showToast(msg: String)

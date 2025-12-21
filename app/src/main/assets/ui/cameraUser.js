@@ -129,7 +129,6 @@ const UI = {
 
   openGallery: () => {
     window.AndroidNative.openGallery("all");
-    window.AndroidNative.showToast("打开相册");
   },
 
   handleOrientation: (event) => {
