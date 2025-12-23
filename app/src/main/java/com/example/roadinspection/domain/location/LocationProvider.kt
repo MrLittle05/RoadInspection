@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 一个可复用的位置服务提供者。
@@ -30,9 +31,21 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
     private val _gpsLevelState = MutableStateFlow(0)
     val gpsLevelFlow: StateFlow<Int> = _gpsLevelState
 
+    private val _distanceState = MutableStateFlow(0.0)
+
+    val distanceFlow = _distanceState.asStateFlow()
+
+    private var lastValidLocation: Location? = null
+
+    var isRecordingDistance = false
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
-            _locationState.value = locationResult.lastLocation
+            val currentLocation = locationResult.lastLocation ?: return
+            _locationState.value = currentLocation;
+            if (isRecordingDistance) {
+                updateDistance(currentLocation)
+            }
         }
     }
 
@@ -93,6 +106,49 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
         // 取消注册 GNSS 状态回调
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && gnssStatusCallback != null) {
             locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+        }
+    }
+
+    fun resetDistanceCounter() {
+        _distanceState.value = 0.0
+        lastValidLocation = null
+        isRecordingDistance = true
+    }
+
+    fun stopDistanceCounter() {
+        isRecordingDistance = false
+    }
+
+    private fun updateDistance(current: Location) {
+        // [过滤 1] 精度过滤：如果当前点误差 > 20米，不可信，直接丢弃
+        if (current.hasAccuracy() && current.accuracy > 20f) {
+            return
+        }
+
+        // [过滤 2] 速度过滤：如果包含速度且速度 < 0.5m/s (1.8km/h)，认为是静止漂移
+        if (current.hasSpeed() && current.speed < 0.5f) {
+            return
+        }
+
+        if (lastValidLocation == null) {
+            // 第一个点，初始化
+            lastValidLocation = current
+            return
+        }
+
+        val previous = lastValidLocation!!
+
+        // 计算两点间直线距离 (底层基于 WGS84 椭球体计算，精度很高)
+        val distanceDelta = previous.distanceTo(current)
+
+        // [过滤 3] 距离阈值过滤：
+        // 只有当移动距离大于两点精度的平均值（或固定阈值如 2米）时，才确信是真的动了。
+        // 这里使用一个经验值：如果移动距离 < 2米，很难区分是漂移还是微动。
+        if (distanceDelta > 2.0f) {
+            // 累加距离
+            _distanceState.value += distanceDelta
+            // 更新“上一个有效点”
+            lastValidLocation = current
         }
     }
 }

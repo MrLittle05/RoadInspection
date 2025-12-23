@@ -136,6 +136,7 @@ fun CameraPreview(imageCapture: ImageCapture) {
 fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider, imageCapture: ImageCapture) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
+    val scope = rememberCoroutineScope()
 
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -164,7 +165,6 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
-                settings.allowFileAccessFromFileURLs = true;
                 webViewClient = object: WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
@@ -175,14 +175,14 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                         }
                     }
                 }
-                loadUrl("file:///android_asset/camera.html")
+                loadUrl("file:///android_asset/index.html")
             }.also { webview ->
                 webView = webview
                 // 在 WebView 初始化之后，定义回调并设置 JavaScript 接口
                 val onImageSavedCallback: (Uri) -> Unit = { uri ->
                     displayLastestPhoto(uri, webview)
                 }
-                webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, imageCapture, onImageSavedCallback), "AndroidNative")
+                webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, locationProvider, imageCapture, onImageSavedCallback, scope), "AndroidNative")
             }
         }
     )

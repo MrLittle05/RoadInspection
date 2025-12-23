@@ -20,6 +20,6 @@ data class DashboardData(
     val netType: String = "N/A",
     val netLevel: Int = 0,
     val gpsLevel: Int = 0,
-//    val totalDistance: Double = 0.0,
-//    val isInspecting: Boolean = false
+    val totalDistance: Double = 0.0,
+    // val isInspecting: Boolean = false
 )

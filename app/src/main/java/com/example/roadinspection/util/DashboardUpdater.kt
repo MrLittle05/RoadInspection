@@ -37,12 +37,13 @@ class DashboardUpdater(
             combine(
                 locationProvider.locationFlow,
                 locationProvider.gpsLevelFlow,
-                networkStatusProvider.networkStatusFlow
-            ) { location, gpsLevel, networkStatus ->
+                networkStatusProvider.networkStatusFlow,
+                locationProvider.distanceFlow
+            ) { location, gpsLevel, networkStatus, totalDist ->
                 // 每当任何一个 flow 发出新数据，这里就会被调用
                 location?.let {
                     // 1. 基于所有真实数据创建 DashboardData 对象
-                    val realData = createDashboardData(it, gpsLevel, networkStatus)
+                    val realData = createDashboardData(it, gpsLevel, networkStatus, totalDist)
 
                     // 2. 将数据对象转换为 JSON 字符串
                     val jsonData = gson.toJson(realData)
@@ -69,7 +70,7 @@ class DashboardUpdater(
 
     // --- 私有辅助方法 ---
 
-    private fun createDashboardData(location: Location, gpsLevel: Int, networkStatus: NetworkStatus): DashboardData {
+    private fun createDashboardData(location: Location, gpsLevel: Int, networkStatus: NetworkStatus, distance: Double): DashboardData {
         return DashboardData(
             timeDiff = location.time - System.currentTimeMillis(),
             lat = location.latitude,
@@ -77,8 +78,8 @@ class DashboardUpdater(
             netType = networkStatus.networkType,
             netLevel = networkStatus.signalLevel,
             gpsLevel = gpsLevel,
-//            totalDistance = 0.0, // TODO: 将来需要实现距离计算逻辑
-//            isInspecting = true  // TODO: 将来需要从巡检状态服务获取
+            totalDistance = distance,
+            // isInspecting = true
         )
     }
 }
