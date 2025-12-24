@@ -2,6 +2,7 @@ package com.example.roadinspection.data.source.local
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
+import com.example.roadinspection.service.KeepAliveService
 
 /**
  * WebAppInterface 接口的具体实现类 (Class)。
@@ -44,7 +46,15 @@ class WebAppInterfaceImpl(
     @JavascriptInterface
     override fun startInspection() {
         showToast("开始巡检：Native 收到指令")
-        // TODO: 启动 GPS 监听服务
+
+        // [新增] 启动保活服务
+        val serviceIntent = Intent(context, KeepAliveService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
+
         locationProvider.resetDistanceCounter()
         lastCaptureDistance = 0.0
         startAutoCaptureMonitoring()
@@ -53,7 +63,11 @@ class WebAppInterfaceImpl(
     @JavascriptInterface
     override fun stopInspection() {
         showToast("停止巡检：数据已保存")
-        // TODO: 停止服务，保存数据库
+
+        // [新增] 停止保活服务
+        val serviceIntent = Intent(context, KeepAliveService::class.java)
+        context.stopService(serviceIntent)
+
         locationProvider.stopDistanceCounter()
         stopAutoCaptureMonitoring()
     }

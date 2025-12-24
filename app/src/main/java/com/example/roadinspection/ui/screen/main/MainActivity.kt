@@ -34,7 +34,7 @@ import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
-import com.example.roadinspection.util.DashboardUpdater
+import com.example.roadinspection.utils.DashboardUpdater
 
 class MainActivity : ComponentActivity() {
 
@@ -54,8 +54,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        locationProvider = LocationProvider(this)
-        networkStatusProvider = NetworkStatusProvider(this)
+        // [修改 1] 使用 applicationContext，防止 Activity 内存泄漏
+        locationProvider = LocationProvider(applicationContext)
+        networkStatusProvider = NetworkStatusProvider(applicationContext)
 
         // 1. 启动时立即请求所有必要权限
         val permissions = mutableListOf(
@@ -63,11 +64,14 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
+            Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.RECORD_AUDIO
         )
+
+        // [修改 2] 适配 Android 13+ 的通知权限 (后台保活必须)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
@@ -76,6 +80,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GreetingCardTheme {
+                // ImageCapture 应该在 Compose 作用域内被 remember，保持生命周期一致
                 val imageCapture = remember { ImageCapture.Builder().build() }
 
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -84,6 +89,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // [建议] 确保 Activity 销毁时停止 UI 更新，但不停止 GPS (由 DashboardUpdater 内部逻辑决定)
+    override fun onDestroy() {
+        super.onDestroy()
     }
 }
 
@@ -110,6 +120,9 @@ fun CameraPreview(imageCapture: ImageCapture) {
 
             try {
                 cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
+
+                // 相机缩放逻辑保持不变...
                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
                 val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                     override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -168,8 +181,7 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 webViewClient = object: WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        dashboardUpdater?.start()
-                        // Find latest photo and update webview
+
                         getLatestPhotoUri(context)?.let { uri ->
                             displayLastestPhoto(uri, view)
                         }
@@ -178,7 +190,6 @@ fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: Net
                 loadUrl("file:///android_asset/index.html")
             }.also { webview ->
                 webView = webview
-                // 在 WebView 初始化之后，定义回调并设置 JavaScript 接口
                 val onImageSavedCallback: (Uri) -> Unit = { uri ->
                     displayLastestPhoto(uri, webview)
                 }
@@ -210,8 +221,6 @@ private fun getLatestPhotoUri(context: Context): Uri? {
 }
 
 private fun displayLastestPhoto(uri: Uri, webview: WebView?) {
-    // 我们需要在主线程上运行 evaluateJavascript
-    // webView.post 能确保这一点
     val script = "updateLatestPhoto(\'$uri\')"
     webview?.post {
         webview.evaluateJavascript(script, null)

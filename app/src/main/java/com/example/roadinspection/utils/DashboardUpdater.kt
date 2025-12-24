@@ -1,4 +1,4 @@
-package com.example.roadinspection.util
+package com.example.roadinspection.utils
 
 import android.location.Location
 import android.webkit.WebView
@@ -59,13 +59,11 @@ class DashboardUpdater(
     }
 
     /**
-     * 停止发送数据并停止位置监听。
+     * 停止发送数据
      */
     fun stop() {
         updateJob?.cancel()
         updateJob = null
-        // 停止位置监听以节省电量
-        locationProvider.stopLocationUpdates()
     }
 
     // --- 私有辅助方法 ---

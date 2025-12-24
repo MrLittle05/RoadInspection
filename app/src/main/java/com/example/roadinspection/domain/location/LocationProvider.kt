@@ -8,60 +8,87 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import com.example.roadinspection.utils.KalmanLatLong
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 
 /**
- * 一个可复用的位置服务提供者。
- * 使用 Flow 向外提供持续的位置更新和 GPS 信号等级。
- * @param context 应用上下文
+ * 道路巡检核心定位服务 (修复版)
+ * 包含：卡尔曼滤波、预热保护、后台断层保护
  */
-class LocationProvider(private val context: Context) { // <-- 已将 context 保存为属性
+class LocationProvider(private val context: Context) {
 
     private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-    // StateFlow for Location
+    // 实例化卡尔曼滤波器
+    private val kalmanFilter = KalmanLatLong(baseQ_metres_per_second = 4.0f)
+
     private val _locationState = MutableStateFlow<Location?>(null)
     val locationFlow: StateFlow<Location?> = _locationState
 
-    // StateFlow for GPS Signal Level
     private val _gpsLevelState = MutableStateFlow(0)
     val gpsLevelFlow: StateFlow<Int> = _gpsLevelState
 
     private val _distanceState = MutableStateFlow(0.0)
-
     val distanceFlow = _distanceState.asStateFlow()
 
     private var lastValidLocation: Location? = null
-
     var isRecordingDistance = false
+
+    // [新增] 预热计数器：忽略冷启动或恢复后的前10个点
+    private var warmUpCounter = 0
+    private val WARM_UP_COUNT = 10
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
-            val currentLocation = locationResult.lastLocation ?: return
-            _locationState.value = currentLocation;
+            val rawLocation = locationResult.lastLocation ?: return
+
+            // 1. 过滤陈旧数据 (>10秒前的缓存不要)
+            val locationAgeNs = android.os.SystemClock.elapsedRealtimeNanos() - rawLocation.elapsedRealtimeNanos
+            if (locationAgeNs > 10_000_000_000L) return
+
+            // 2. 卡尔曼滤波处理
+            kalmanFilter.process(
+                latMeasurement = rawLocation.latitude,
+                lngMeasurement = rawLocation.longitude,
+                accuracy = rawLocation.accuracy,
+                timestampMs = rawLocation.time,
+                currentSpeed = rawLocation.speed
+            )
+
+            // 3. 构建平滑后的 Location
+            val filteredLocation = Location("KalmanFilter").apply {
+                latitude = kalmanFilter.getLat()
+                longitude = kalmanFilter.getLng()
+                accuracy = rawLocation.accuracy
+                time = rawLocation.time
+                speed = rawLocation.speed
+                bearing = rawLocation.bearing
+                altitude = rawLocation.altitude
+                elapsedRealtimeNanos = rawLocation.elapsedRealtimeNanos
+            }
+
+            // 更新 UI
+            _locationState.value = filteredLocation
+
             if (isRecordingDistance) {
-                updateDistance(currentLocation)
+                updateDistance(filteredLocation)
             }
         }
     }
 
-    // GNSS status callback to determine signal strength
     private val gnssStatusCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
                 super.onSatelliteStatusChanged(status)
                 var satellitesWithGoodSignal = 0
                 for (i in 0 until status.satelliteCount) {
-                    // A C/N0 of > 30 dBHz is generally considered good signal
-                    if (status.getCn0DbHz(i) > 30) {
-                        satellitesWithGoodSignal++
-                    }
+                    if (status.getCn0DbHz(i) > 30) satellitesWithGoodSignal++
                 }
-                // Simple mapping to a 0-4 scale
                 _gpsLevelState.value = when {
                     satellitesWithGoodSignal >= 10 -> 4
                     satellitesWithGoodSignal >= 7 -> 3
@@ -77,6 +104,9 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
+        // [关键修复] 每次开始定位都强制预热，防止刚打开时的乱跳
+        warmUpCounter = WARM_UP_COUNT
+
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
             .setWaitForAccurateLocation(false)
             .setMinUpdateIntervalMillis(500)
@@ -85,16 +115,10 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
 
         try {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-            
-            // 为不同安卓版本使用不同的 API 注册 GNSS 状态回调
-            if (gnssStatusCallback != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // Android R (API 30) 及以上版本使用带 Executor 的现代 API
-                    locationManager.registerGnssStatusCallback(ContextCompat.getMainExecutor(context), gnssStatusCallback)
-                } else {
-                    // Android N (API 24) 到 Q (API 29) 使用已弃用的 API
-                    locationManager.registerGnssStatusCallback(gnssStatusCallback)
-                }
+            if (gnssStatusCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                locationManager.registerGnssStatusCallback(ContextCompat.getMainExecutor(context), gnssStatusCallback)
+            } else if (gnssStatusCallback != null) {
+                locationManager.registerGnssStatusCallback(gnssStatusCallback)
             }
         } catch (e: SecurityException) {
             e.printStackTrace()
@@ -103,7 +127,6 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
 
     fun stopLocationUpdates() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        // 取消注册 GNSS 状态回调
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && gnssStatusCallback != null) {
             locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
         }
@@ -112,6 +135,9 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
     fun resetDistanceCounter() {
         _distanceState.value = 0.0
         lastValidLocation = null
+        kalmanFilter.reset()
+        // [关键修复] 重置里程时也要预热
+        warmUpCounter = WARM_UP_COUNT
         isRecordingDistance = true
     }
 
@@ -119,36 +145,46 @@ class LocationProvider(private val context: Context) { // <-- 已将 context 保
         isRecordingDistance = false
     }
 
-    private fun updateDistance(current: Location) {
-        // [过滤 1] 精度过滤：如果当前点误差 > 20米，不可信，直接丢弃
-        if (current.hasAccuracy() && current.accuracy > 20f) {
+    private fun updateDistance(filteredCurrent: Location) {
+        // [关键修复 1] 预热期保护：只消耗计数，坚决不更新锚点
+        if (warmUpCounter > 0) {
+            warmUpCounter--
             return
         }
 
-        // [过滤 2] 速度过滤：如果包含速度且速度 < 0.5m/s (1.8km/h)，认为是静止漂移
-        if (current.hasSpeed() && current.speed < 0.5f) {
+        // [关键修复 2] 静止过滤：从 0.2 提高到 0.5 (1.8km/h)
+        if (filteredCurrent.hasSpeed() && filteredCurrent.speed < 0.5f) {
             return
         }
 
         if (lastValidLocation == null) {
-            // 第一个点，初始化
-            lastValidLocation = current
+            lastValidLocation = filteredCurrent
             return
         }
 
         val previous = lastValidLocation!!
+        val timeDeltaMs = abs(filteredCurrent.time - previous.time)
 
-        // 计算两点间直线距离 (底层基于 WGS84 椭球体计算，精度很高)
-        val distanceDelta = previous.distanceTo(current)
+        // [关键修复 3] 断层保护
+        if (timeDeltaMs > 10_000) {
+            lastValidLocation = filteredCurrent
+            // 刚从后台回来，数据可能不稳，追加一点点预热
+            warmUpCounter = 5
+            return
+        }
 
-        // [过滤 3] 距离阈值过滤：
-        // 只有当移动距离大于两点精度的平均值（或固定阈值如 2米）时，才确信是真的动了。
-        // 这里使用一个经验值：如果移动距离 < 2米，很难区分是漂移还是微动。
-        if (distanceDelta > 2.0f) {
-            // 累加距离
+        val distanceDelta = previous.distanceTo(filteredCurrent)
+
+        if (distanceDelta > 0.5f) {
+            // [关键修复 4] 瞬移保护
+            val calculatedSpeed = if (timeDeltaMs > 0) distanceDelta / (timeDeltaMs / 1000.0) else 0.0
+            if (calculatedSpeed > 40.0 && (!filteredCurrent.hasSpeed() || filteredCurrent.speed < 30.0)) {
+                lastValidLocation = filteredCurrent
+                return
+            }
+
             _distanceState.value += distanceDelta
-            // 更新“上一个有效点”
-            lastValidLocation = current
+            lastValidLocation = filteredCurrent
         }
     }
 }
