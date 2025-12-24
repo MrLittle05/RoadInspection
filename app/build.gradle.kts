@@ -55,7 +55,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.gson)
-    // 直接添加定位服务库以解决报错
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.huawei.hms:base:6.11.0.300")
     implementation("com.huawei.hms:location:6.9.0.300")

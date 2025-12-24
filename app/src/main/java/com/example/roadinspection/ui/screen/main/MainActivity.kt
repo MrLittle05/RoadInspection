@@ -2,10 +2,13 @@ package com.example.roadinspection.ui.screen.main
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ContentUris
+import android.content.Context
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
 import android.view.ScaleGestureDetector
 import android.view.ViewGroup
@@ -16,6 +19,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -62,28 +66,32 @@ class MainActivity : ComponentActivity() {
         }
 
         // 1. 启动时立即请求所有必要权限
-        requestPermissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.RECORD_AUDIO
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_PHONE_STATE, // 获取网络状态需要
+            Manifest.permission.RECORD_AUDIO
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        requestPermissionLauncher.launch(permissions.toTypedArray())
 
         setContent {
             GreetingCardTheme {
+                val imageCapture = remember { ImageCapture.Builder().build() }
+
                 Box(modifier = Modifier.fillMaxSize()) {
-                    CameraPreview()
-                    // 确保只在 gpsSignalUpdater 初始化后才调用
+                    CameraPreview(imageCapture)
                     if (::gpsSignalUpdater.isInitialized) {
-                        WebViewScreen(locationProvider, networkStatusProvider, gpsSignalUpdater)
+                        WebViewScreen(locationProvider, networkStatusProvider, gpsSignalUpdater, imageCapture)
                     } else {
-                        // 对于不支持 GnssStatus 的旧设备，可以提供一个不含 gpsUpdater 的版本
-                        // 为了简化，这里我们暂时只在支持的设备上显示 WebView
+                        // Fallback for older devices without GnssStatus support
                     }
                 }
             }
@@ -92,15 +100,15 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun CameraPreview() {
+fun CameraPreview(imageCapture: ImageCapture) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-            PreviewView(ctx).apply {
+        factory = {
+            PreviewView(it).apply {
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
@@ -114,7 +122,7 @@ fun CameraPreview() {
 
             try {
                 cameraProvider.unbindAll()
-                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
                 val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                     override fun onScale(detector: ScaleGestureDetector): Boolean {
                         val zoomState = camera.cameraInfo.zoomState.value
@@ -140,10 +148,12 @@ fun CameraPreview() {
 fun WebViewScreen(
     locationProvider: LocationProvider,
     networkStatusProvider: NetworkStatusProvider,
-    gpsSignalUpdater: GPSSignalUpdater
+    gpsSignalUpdater: GPSSignalUpdater,
+    imageCapture: ImageCapture
 ) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
+    val scope = rememberCoroutineScope()
 
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -172,17 +182,55 @@ fun WebViewScreen(
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
-                addJavascriptInterface(WebAppInterfaceImpl(context, selectImageLauncher), "AndroidNative")
-                webViewClient = object: WebViewClient() {
+                webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         dashboardUpdater?.start()
+                        // Find latest photo and update webview
+                        getLatestPhotoUri(context)?.let { uri ->
+                            displayLastestPhoto(uri, view)
+                        }
                     }
                 }
-                loadUrl("file:///android_asset/camera.html")
-            }.also {
-                webView = it
+                loadUrl("file:///android_asset/index.html")
+            }.also { webview ->
+                webView = webview
+                // 在 WebView 初始化之后，定义回调并设置 JavaScript 接口
+                val onImageSavedCallback: (Uri) -> Unit = { uri ->
+                    displayLastestPhoto(uri, webview)
+                }
+                webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, locationProvider, imageCapture, onImageSavedCallback, scope), "AndroidNative")
             }
         }
     )
+}
+
+private fun getLatestPhotoUri(context: Context): Uri? {
+    val collection =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+    val projection = arrayOf(MediaStore.Images.Media._ID)
+    val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+    context.contentResolver.query(collection, projection, null, null, sortOrder)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val id = cursor.getLong(idColumn)
+            return ContentUris.withAppendedId(collection, id)
+        }
+    }
+    return null
+}
+
+private fun displayLastestPhoto(uri: Uri, webview: WebView?) {
+    // 我们需要在主线程上运行 evaluateJavascript
+    // webView.post 能确保这一点
+    val script = "updateLatestPhoto('$uri')"
+    webview?.post {
+        webview.evaluateJavascript(script, null)
+    }
 }

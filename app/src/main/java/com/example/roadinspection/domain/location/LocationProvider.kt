@@ -22,12 +22,8 @@ import com.huawei.hms.location.LocationResult as HmsLocationResult
 import com.huawei.hms.location.LocationServices as HmsLocationServices
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * A reusable location service provider that abstracts away the underlying implementation (GMS or HMS).
- * It provides continuous location updates and GPS signal level via Flow.
- * @param context The application context.
- */
 class LocationProvider(private val context: Context) {
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -38,16 +34,27 @@ class LocationProvider(private val context: Context) {
     private val _gpsLevelState = MutableStateFlow(0)
     val gpsLevelFlow: StateFlow<Int> = _gpsLevelState
 
+    private val _distanceState = MutableStateFlow(0.0)
+    val distanceFlow = _distanceState.asStateFlow()
+
+    private var lastValidLocation: Location? = null
+    var isRecordingDistance = false
+
     private val locationUpdateProvider: LocationUpdateProvider
 
     init {
+        val onLocationResult: (Location) -> Unit = { location ->
+            _locationState.value = location
+            if (isRecordingDistance) {
+                updateDistance(location)
+            }
+        }
+
         locationUpdateProvider = if (isGmsAvailable()) {
-            GmsLocationProvider(context, _locationState)
+            GmsLocationProvider(context, onLocationResult)
         } else if (isHmsAvailable()) {
-            HmsLocationProvider(context, _locationState)
+            HmsLocationProvider(context, onLocationResult)
         } else {
-            // Fallback or error handling if neither is available
-            // For simplicity, we'''ll use a no-op implementation
             object : LocationUpdateProvider {
                 override fun startLocationUpdates() {}
                 override fun stopLocationUpdates() {}
@@ -85,7 +92,6 @@ class LocationProvider(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
         locationUpdateProvider.startLocationUpdates()
-        // Register GNSS status callback for signal strength
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             locationManager.registerGnssStatusCallback(ContextCompat.getMainExecutor(context), gnssStatusCallback)
         } else {
@@ -98,28 +104,50 @@ class LocationProvider(private val context: Context) {
         locationUpdateProvider.stopLocationUpdates()
         locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
     }
+
+    fun resetDistanceCounter() {
+        _distanceState.value = 0.0
+        lastValidLocation = null
+        isRecordingDistance = true
+    }
+
+    fun stopDistanceCounter() {
+        isRecordingDistance = false
+    }
+
+    private fun updateDistance(current: Location) {
+        if (current.hasAccuracy() && current.accuracy > 20f) {
+            return
+        }
+        if (current.hasSpeed() && current.speed < 0.5f) {
+            return
+        }
+        if (lastValidLocation == null) {
+            lastValidLocation = current
+            return
+        }
+        val previous = lastValidLocation!!
+        val distanceDelta = previous.distanceTo(current)
+        if (distanceDelta > 2.0f) {
+            _distanceState.value += distanceDelta
+            lastValidLocation = current
+        }
+    }
 }
 
-/**
- * Interface for location update providers (GMS/HMS).
- */
 private interface LocationUpdateProvider {
     fun startLocationUpdates()
     fun stopLocationUpdates()
 }
 
-/**
- * GMS implementation of LocationUpdateProvider.
- */
 private class GmsLocationProvider(
-    context: Context,
-    private val locationState: MutableStateFlow<Location?>
+    private val context: Context,
+    private val onLocationResult: (Location) -> Unit
 ) : LocationUpdateProvider {
     private val fusedLocationClient = GmsLocationServices.getFusedLocationProviderClient(context)
-
     private val locationCallback = object : GmsLocationCallback() {
         override fun onLocationResult(locationResult: GmsLocationResult) {
-            locationState.value = locationResult.lastLocation
+            locationResult.lastLocation?.let(onLocationResult)
         }
     }
 
@@ -142,18 +170,14 @@ private class GmsLocationProvider(
     }
 }
 
-/**
- * HMS implementation of LocationUpdateProvider.
- */
 private class HmsLocationProvider(
-    context: Context,
-    private val locationState: MutableStateFlow<Location?>
+    private val context: Context,
+    private val onLocationResult: (Location) -> Unit
 ) : LocationUpdateProvider {
     private val fusedLocationClient = HmsLocationServices.getFusedLocationProviderClient(context)
-
     private val locationCallback = object : HmsLocationCallback() {
         override fun onLocationResult(locationResult: HmsLocationResult) {
-            locationState.value = locationResult.lastLocation
+            locationResult.lastLocation?.let(onLocationResult)
         }
     }
 

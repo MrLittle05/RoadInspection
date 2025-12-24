@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Road Inspection HUD</title>
+    <script type="module" crossorigin>(function(){const e=document.createElement("link").relList;if(e&&e.supports&&e.supports("modulepreload"))return;for(const o of document.querySelectorAll('link[rel="modulepreload"]'))c(o);new MutationObserver(o=>{for(const s of o)if(s.type==="childList")for(const u of s.addedNodes)u.tagName==="LINK"&&u.rel==="modulepreload"&&c(u)}).observe(document,{childList:!0,subtree:!0});function i(o){const s={};return o.integrity&&(s.integrity=o.integrity),o.referrerPolicy&&(s.referrerPolicy=o.referrerPolicy),o.crossOrigin==="use-credentials"?s.credentials="include":o.crossOrigin==="anonymous"?s.credentials="omit":s.credentials="same-origin",s}function c(o){if(o.ep)return;o.ep=!0;const s=i(o);fetch(o.href,s)}})();const a={totalDistance:null,address:null,gps:null,time:null,gpsLevel:null,netLevel:null,lastPhoto:null},f={timeOffset:0},l={initElements:()=>{a.totalDistance=document.getElementById("total-dist"),a.address=document.getElementById("address"),a.gps=document.getElementById("gps-raw"),a.time=document.getElementById("time"),a.gpsLevel=document.getElementById("gps-accuracy"),a.netLevel=document.getElementById("net-strength"),a.lastPhoto=document.getElementById("last-photo")},updateTotalDistance:t=>{t!=null&&(a.totalDistance.innerText=(t/1e3).toFixed(3))},updatePosition:(t,e)=>{const i=t?t>0?"N":"S":"",c=(Math.abs(t)||0).toFixed(6),o=e?e>0?"E":"W":"",s=(Math.abs(e)||0).toFixed(6);a.gps.innerText=`${i}:${c}  ${o}:${s}`},updateTimeOffset:t=>{(t!==void 0||t!==null)&&(f.timeOffset=t)},updateTime:t=>{const e=Date.now()+t,i=new Date(e),c=i.getFullYear()+"/"+String(i.getMonth()+1).padStart(2,"0")+"/"+String(i.getDate()).padStart(2,"0"),o=String(i.getHours()).padStart(2,"0")+":"+String(i.getMinutes()).padStart(2,"0")+":"+String(i.getSeconds()).padStart(2,"0");a.time.innerText=`${c}  ${o}`},updateAddress:t=>{a.address.innerText=t},updateGpsSignal:t=>{const e=["无","弱","较弱","较强","强"][t]||"无";a.gpsLevel.innerText=e},updateNetSignal:t=>{const e=["无","弱","较弱","较强","强"][t]||"无";a.netLevel.innerText=e},updateLatestPhoto:t=>{const e=a.lastPhoto;e&&(e.src=t,e.style.display="block")}};window.updateLatestPhoto=l.updateLatestPhoto;window.JSBridge={updateDashboard:function(t){try{const e=JSON.parse(t);l.updateTotalDistance(e.totalDistance),l.updateTimeOffset(e.timeDiff),l.updatePosition(e.lat,e.lng)}catch(e){console.error("Data parse error",e)}},updateGpsSignal:function(t){l.updateGpsSignal(t)},updateNetSignal:function(t){l.updateNetSignal(t)},updateAddress:function(t){l.updateAddress(t)},onPhotoTaken:function(t){try{const e=JSON.parse(t);l.onPhotoTaken(e)}catch(e){console.error(e)}}};const n={infoBtn:null,zoom1Btn:null,zoom05Btn:null,modePhotoBtn:null,modeVideoBtn:null,galleryBtn:null,shutterBtn:null,aiBtn:null,timer:null},r={currentMode:"video",isRecording:!1,recordSeconds:0,currentRotationState:0,timerInterval:null};window.AndroidNative||(window.AndroidNative={startInspection:()=>console.log("Mock: Start Inspection"),stopInspection:()=>console.log("Mock: Stop Inspection"),manualCapture:()=>console.log("Mock: Take Photo"),showToast:t=>console.log("Toast: "+t),openGallery:t=>console.log("Open Gallery: "+t)});const d={initElements:()=>{n.infoBtn=document.getElementById("btn-info"),n.zoom1Btn=document.getElementById("btn-zoom-1"),n.zoom05Btn=document.getElementById("btn-zoom-05"),n.modePhotoBtn=document.getElementById("btn-mode-photo"),n.modeVideoBtn=document.getElementById("btn-mode-video"),n.galleryBtn=document.getElementById("btn-gallery"),n.shutterBtn=document.getElementById("btn-shutter"),n.aiBtn=document.getElementById("btn-ai"),n.timer=document.getElementById("timer")},bind:(t,e)=>{switch(t){case"info":n.infoBtn.addEventListener("click",e);break;case"zoom1":n.zoom1Btn.addEventListener("click",e);break;case"zoom05":n.zoom05Btn.addEventListener("click",e);break;case"modePhoto":n.modePhotoBtn.addEventListener("click",e);break;case"modeVideo":n.modeVideoBtn.addEventListener("click",e);break;case"gallery":n.galleryBtn.addEventListener("click",e);break;case"shutter":n.shutterBtn.addEventListener("click",e);break;case"ai":n.aiBtn.addEventListener("click",e);break;case"rotation":window.addEventListener("deviceorientation",e)}},toggleDisplayInfo:()=>{const t=document.querySelector(".text-info");t.classList.contains("info-hidden")?t.classList.remove("info-hidden"):t.classList.add("info-hidden")},setZoom:t=>{document.querySelectorAll(".zoom-btn").forEach(i=>i.classList.remove("active"));const e=t===1?"btn-zoom-1":"btn-zoom-05";document.getElementById(e).classList.add("active"),window.AndroidNative.showToast("缩放: "+t+"x")},switchMode:t=>{if(r.isRecording)return;r.currentMode=t,document.querySelectorAll(".mode-item").forEach(i=>i.classList.remove("active")),document.getElementById("btn-mode-"+t).classList.add("active");const e=document.getElementById("shutter-btn");t==="photo"?(n.timer.classList.add("hidden"),e.classList.add("photo-mode")):(n.timer.classList.remove("hidden"),e.classList.remove("photo-mode"))},handleShutter:()=>{r.currentMode==="photo"?(window.AndroidNative.manualCapture(),g()):r.isRecording?y():h()},toggleAI:()=>{window.AndroidNative.showToast("AI 算法配置中")},openGallery:()=>{window.AndroidNative.openGallery("all")},handleOrientation:t=>{let{beta:e,gamma:i}=t;const c=S(e,i,r.currentRotationState);if(c!==r.currentRotationState){r.currentRotationState=c;const o=document.querySelector(".layout-root");o.classList.remove("mode-portrait","mode-tilt-left","mode-tilt-right"),r.currentRotationState===0&&o.classList.add("mode-portrait"),r.currentRotationState===90&&o.classList.add("mode-tilt-left"),r.currentRotationState===-90&&o.classList.add("mode-tilt-right"),document.querySelectorAll(".rotatable").forEach(s=>{s.style.transform=`rotate(${r.currentRotationState}deg)`})}}};function g(){const t=document.querySelector(".shutter-inner");t.style.transform="scale(0.5)",setTimeout(()=>t.style.transform="scale(1)",100);const e=document.createElement("div");e.style.cssText="position:fixed;top:0;left:0;width:100%;height:100%;background:black;opacity:0.6;z-index:999;transition:opacity 0.2s;",document.body.appendChild(e),setTimeout(()=>e.style.opacity=0,50),setTimeout(()=>e.remove(),250)}function h(){r.isRecording=!0,document.getElementById("shutter-btn").classList.add("recording"),n.timer&&n.timer.classList.add("active"),window.AndroidNative.startInspection(),r.recordSeconds=0,m(),r.timerInterval=setInterval(()=>{r.recordSeconds++,m()},1e3)}function y(){r.isRecording=!1,document.getElementById("shutter-btn").classList.remove("recording"),n.timer&&n.timer.classList.remove("active"),window.AndroidNative.stopInspection(),r.recordSeconds=0,m(),clearInterval(r.timerInterval)}function m(){const t=Math.floor(r.recordSeconds/3600).toString().padStart(2,"0"),e=Math.floor(r.recordSeconds%3600/60).toString().padStart(2,"0"),i=(r.recordSeconds%60).toString().padStart(2,"0");n.timer.innerText=`${t}:${e}:${i}`}function S(t,e,i){t>90&&(t=180-t),t<-90&&(t=-180-t);const c=Math.abs(e),o=Math.abs(t);if(o<10&&c<10)return;let s=i;const u=i===90||i===-90,p=o>30;return u?p&&(o>c+15?s=0:(e>20&&(s=-90),e<-20&&(s=90))):c>o+15&&(s=e>0?-90:90),s}document.addEventListener("DOMContentLoaded",v());function v(){d.initElements(),l.initElements(),B(),setInterval(()=>{l.updateTime(f.timeOffset)},1e3)}function B(){d.bind("info",d.toggleDisplayInfo),d.bind("zoom1",()=>d.setZoom(1)),d.bind("zoom05",()=>d.setZoom(.5)),d.bind("modePhoto",()=>d.switchMode("photo")),d.bind("modeVideo",()=>d.switchMode("video")),d.bind("gallery",d.openGallery),d.bind("shutter",d.handleShutter),d.bind("ai",d.toggleAI),d.bind("rotation",d.handleOrientation)}</script>
+    <style rel="stylesheet" crossorigin>*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;padding:0;width:100vw;height:100vh;background-color:transparent;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#fff;overflow:hidden;-webkit-user-select:none;user-select:none}.rotatable{transition:transform .3s ease}.layout-root{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;justify-content:space-between}.panel-top{position:sticky;top:0;left:0;width:100%;height:80px;background:#0000;display:flex;justify-content:space-between;align-items:center;padding:0 16px;z-index:10}.tl-group{display:flex;align-items:center;gap:12px}.btn-square{width:36px;height:36px;display:flex;justify-content:center;align-items:center;border-radius:50%}.btn-square:active{opacity:.7}.text-info{position:absolute;top:60px;right:16px;font-family:monospace;opacity:.8;font-size:12px;color:#eee;text-shadow:0 1px 2px rgba(0,0,0,.8);line-height:1.3;text-align:right;margin-right:10px;transition:all .3s ease;z-index:5;pointer-events:none}#address{max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.info-hidden{display:none}.distance-display{position:absolute;left:50%;transform:translate(-50%);text-align:center}.dist-val-row{display:flex;align-items:baseline;justify-content:center;background:#0000;padding:4px 12px;border-radius:12px}.signal-display{display:flex;flex-direction:column;align-items:flex-end;gap:4px}.sig-row{display:flex;align-items:center;gap:4px;font-size:10px;background:#0000;padding:2px 6px;border-radius:4px}.flex-center{position:fixed;top:80px;display:flex;width:100%;justify-content:center;align-items:center}.center-timer{background:#0000004d;color:#fff;font-weight:700;padding:4px 5px;border-radius:3px;font-family:monospace;font-size:16px}.center-timer.hidden{background:transparent;color:transparent}.center-timer.active{display:block;background:#ff3b30}.zoom-floater{position:fixed;bottom:160px;left:50%;transform:translate(-50%);display:flex;gap:12px;z-index:5}.zoom-btn{width:32px;height:32px;border-radius:50%;border:none;background:#00000080;color:#fff;font-size:11px;font-weight:600;display:flex;justify-content:center;align-items:center;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);transition:all .2s}.zoom-btn.active{background:#ffcc00e6;color:#000;transform:scale(1.1)}.mode-slider{position:fixed;bottom:120px;left:0;width:100%;display:flex;justify-content:center;gap:20px;z-index:5;padding-bottom:10px;mask-image:linear-gradient(to right,transparent,black 40%,black 60%,transparent);-webkit-mask-image:linear-gradient(to right,transparent,black 40%,black 60%,transparent)}.mode-item{font-size:14px;font-weight:500;color:#fff9;padding:4px 8px;transition:all .2s;text-shadow:0 1px 2px rgba(0,0,0,.5)}.mode-item.active{color:#fc0;font-weight:700;font-size:15px;transform:scale(1.05)}.panel-bottom{position:fixed;bottom:0;left:0;width:100%;height:120px;background:#0000;display:flex;justify-content:space-around;align-items:center;padding-bottom:20px;z-index:10}.gallery-thumb{width:44px;height:44px;background:#0003;border-radius:6px;overflow:hidden;position:relative}.gallery-thumb img{width:100%;height:100%;object-fit:cover}.gallery-icon-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:#ffffff1a}#last-photo[src=""]{display:none}.gallery-thumb img[src]:not([src=""])+.gallery-icon-overlay{display:none}.shutter-outer{width:70px;height:70px;border-radius:50%;border:4px solid white;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}.shutter-inner{width:58px;height:58px;background-color:#ff3b30;border-radius:50%;background-clip:padding-box;transition:all .2s ease-in-out}.shutter-inner.recording{width:28px;height:28px;border-radius:4px}.shutter-inner.photo-mode{background-color:#fff}.ai-btn{width:44px;height:44px;background:#ffffff26;border-radius:50%;display:flex;flex-direction:column;justify-content:center;align-items:center;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}.ai-btn:active{background:#ffffff4d}.mode-tilt-left .text-info{right:2px;top:220px;transform-origin:top right;transform:rotate(90deg);text-align:left}.mode-tilt-right .text-info{right:40px;top:60px;transform-origin:top right;transform:rotate(-90deg);text-align:right}.mode-tilt-left .flex-center{right:0;top:0;width:auto;height:100%;flex-direction:column;transform-origin:center center;transform:rotate(90deg)}.mode-tilt-right .flex-center{left:0;top:0;width:auto;height:100%;flex-direction:column;transform-origin:center center;transform:rotate(-90deg)}</style>
+  </head>
+  <body>
+    <div id="layout-root" class="layout-root">
+      <!-- 顶部信息区 -->
+      <div class="panel-top">
+        <!-- 左侧：信号 (需旋转) -->
+        <div class="signal-display rotatable">
+          <div class="sig-row">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"
+              />
+            </svg>
+            <span id="gps-accuracy">--</span>
+          </div>
+          <div class="sig-row">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
+              <path
+                d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+              />
+            </svg>
+            <span id="net-strength">--</span>
+          </div>
+        </div>
+
+        <!-- 中间：距离 -->
+        <div class="distance-display">
+          <div class="dist-val-row">
+            <span
+              style="font-size: 20px; font-weight: bold; color: #fff"
+              id="total-dist"
+              >0.000</span
+            >
+            <span style="font-size: 12px; color: #ddd; margin-left: 2px"
+              >KM</span
+            >
+          </div>
+        </div>
+
+        <!-- 右侧：信息图标 + 详情 (需旋转) -->
+        <div class="tl-group">
+          <div id="btn-info" class="btn-square wave-btn rotatable">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+              <path
+                d="M2 12c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2zM2 6c0-2 2-2 2-2s2 2 4 2 4-2 4-2 4 2 4 2 4-2 4-2v2c0 2-2 2-4 2s-4-2-4-2-2 2-4 2-4-2-4-2-4 2-4 2v-2z"
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-info info-hidden">
+        <div id="time">2025/--/-- --:--</div>
+        <div id="gps-raw">N:0 E:0</div>
+        <div id="address">定位初始化中...</div>
+      </div>
+
+      <!-- 镜头顶部中间 顶部控制区下方：计时器 -->
+      <div class="flex-center">
+        <div class="center-timer" id="timer">00:00:00</div>
+      </div>
+
+      <!-- 镜头缩放 在模式切换上方 (需旋转) -->
+      <div class="zoom-floater">
+        <button id="btn-zoom-1" class="zoom-btn active rotatable">1×</button>
+        <button id="btn-zoom-05" class="zoom-btn rotatable">0.5</button>
+      </div>
+
+      <!-- 模式切换 底部控制区上方 可以滑动调节 (需旋转) -->
+      <div class="mode-slider">
+        <div class="mode-item rotatable" id="btn-mode-photo">照片</div>
+        <div class="mode-item active rotatable" id="btn-mode-video">视频</div>
+      </div>
+
+      <!-- 底部控制区 -->
+      <div class="panel-bottom">
+        <!-- 左侧：相册 (需旋转) -->
+        <div id="btn-gallery" class="gallery-thumb rotatable">
+          <img id="last-photo" src="" alt="" />
+          <!-- 默认图标 -->
+          <div class="gallery-icon-overlay">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+              <path
+                fill="#ffffff"
+                d="M160 96C124.7 96 96 124.7 96 160L96 480C96 515.3 124.7 544 160 544L480 544C515.3 544 544 515.3 544 480L544 160C544 124.7 515.3 96 480 96L160 96zM224 176C250.5 176 272 197.5 272 224C272 250.5 250.5 272 224 272C197.5 272 176 250.5 176 224C176 197.5 197.5 176 224 176zM368 288C376.4 288 384.1 292.4 388.5 299.5L476.5 443.5C481 450.9 481.2 460.2 477 467.8C472.8 475.4 464.7 480 456 480L184 480C175.1 480 166.8 475 162.7 467.1C158.6 459.2 159.2 449.6 164.3 442.3L220.3 362.3C224.8 355.9 232.1 352.1 240 352.1C247.9 352.1 255.2 355.9 259.7 362.3L286.1 400.1L347.5 299.6C351.9 292.5 359.6 288.1 368 288.1z"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <!-- 中间：快门按钮 -->
+        <div id="btn-shutter" class="shutter-outer">
+          <div class="shutter-inner" id="shutter-btn"></div>
+        </div>
+
+        <!-- 右侧：AI 算法按钮 (需旋转) -->
+        <div id="btn-ai" class="ai-btn rotatable">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
+            <path
+              d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.9-2 2-2 .55 0 1-.45 1-1s-.45-1-1-1c-.55 0-1 .45-1 1H10c0-1.66 1.34-3 3-3s3 1.34 3 3c0 .55-.45 1.05-.93 1.5z"
+            />
+          </svg>
+          <span style="font-size: 10px; margin-top: 2px">AI</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
