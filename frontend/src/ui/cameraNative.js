@@ -73,12 +73,12 @@ const UI = {
     elements.address.innerText = addr;
   },
 
-  updateGpsSignal: (gpsLevel) => {
+  updateGpsLevel: (gpsLevel) => {
     const text = ["无", "弱", "较弱", "较强", "强"][gpsLevel] || "无";
     elements.gpsLevel.innerText = text;
   },
 
-  updateNetSignal: (netLevel) => {
+  updateNetLevel: (netLevel) => {
     const text = ["无", "弱", "较弱", "较强", "强"][netLevel] || "无";
     elements.netLevel.innerText = text;
   },

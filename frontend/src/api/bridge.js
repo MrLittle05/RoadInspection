@@ -16,12 +16,12 @@ window.JSBridge = {
     }
   },
 
-  updateGpsSignal: function (gpsLevel) {
-    nativeUI.updateGpsSignal(gpsLevel);
+  updateGpsLevel: function (gpsLevel) {
+    nativeUI.updateGpsLevel(gpsLevel);
   },
 
-  updateNetSignal: function (netLevel) {
-    nativeUI.updateNetSignal(netLevel);
+  updateNetLevel: function (netLevel) {
+    nativeUI.updateNetLevel(netLevel);
   },
 
   updateAddress: function (addr) {

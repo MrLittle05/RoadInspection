@@ -25,7 +25,7 @@ class DashboardUpdater(
     private val gson = Gson()
 
     /**
-     * 启动三个并行的数据监听任务
+     * 启动并行的数据监听任务，更新前端仪表盘数据
      */
     fun start() {
         // 清理旧任务（如果有）
@@ -35,7 +35,7 @@ class DashboardUpdater(
         startHighFrequencyUpdates()
 
         // 2. 低频任务：GPS 信号强度
-        startGpsSignalUpdates()
+        startGpsLevelUpdates()
 
         // 3. 低频任务：网络状态
         startNetworkStatusUpdates()
@@ -75,11 +75,11 @@ class DashboardUpdater(
         }
     }
 
-    private fun startGpsSignalUpdates() {
+    private fun startGpsLevelUpdates() {
         scope.launch {
             locationProvider.gpsLevelFlow
                 .collect { level ->
-                    val script = "window.JSBridge.updateGpsSignal($level)"
+                    val script = "window.JSBridge.updateGpsLevel($level)"
                     webView.evaluateJavascript(script, null)
                 }
         }
@@ -89,9 +89,9 @@ class DashboardUpdater(
         scope.launch {
             networkStatusProvider.networkStatusFlow
                 .map { it.signalLevel } // 这里只提取强度，如果 JS 需要类型(5G/WIFI)，可改为传递完整对象
-                .distinctUntilChanged() // 关键：只有网络信号格数变化时才触发
+                .distinctUntilChanged() // 只有网络信号状态变化时才触发
                 .collect { level ->
-                    val script = "window.JSBridge.updateNetSignal($level)"
+                    val script = "window.JSBridge.updateNetLevel($level)"
                     webView.evaluateJavascript(script, null)
                 }
         }
