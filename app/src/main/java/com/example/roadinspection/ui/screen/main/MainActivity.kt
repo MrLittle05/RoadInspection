@@ -31,10 +31,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
+import com.example.roadinspection.domain.camera.CameraHelper
+import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.utils.DashboardUpdater
+import com.example.roadinspection.utils.notifyJsUpdatePhoto
 
 class MainActivity : ComponentActivity() {
 
@@ -54,11 +57,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // [修改 1] 使用 applicationContext，防止 Activity 内存泄漏
+        // 使用 applicationContext 防止内存泄漏
         locationProvider = LocationProvider(applicationContext)
         networkStatusProvider = NetworkStatusProvider(applicationContext)
 
-        // 1. 启动时立即请求所有必要权限
+        // 启动时请求权限
         val permissions = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -68,7 +71,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.RECORD_AUDIO
         )
 
-        // [修改 2] 适配 Android 13+ 的通知权限 (后台保活必须)
+        // 适配 Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -80,20 +83,21 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GreetingCardTheme {
-                // ImageCapture 应该在 Compose 作用域内被 remember，保持生命周期一致
+                // ImageCapture 保持在 Compose 作用域内
                 val imageCapture = remember { ImageCapture.Builder().build() }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     CameraPreview(imageCapture)
+                    // 将 locationProvider 等传递给 UI 层
                     WebViewScreen(locationProvider, networkStatusProvider, imageCapture)
                 }
             }
         }
     }
 
-    // [建议] 确保 Activity 销毁时停止 UI 更新，但不停止 GPS (由 DashboardUpdater 内部逻辑决定)
     override fun onDestroy() {
         super.onDestroy()
+        locationProvider.stopLocationUpdates()
     }
 }
 
@@ -122,7 +126,7 @@ fun CameraPreview(imageCapture: ImageCapture) {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
 
-                // 相机缩放逻辑保持不变...
+                // 简单的触摸缩放逻辑
                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
                 val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                     override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -144,68 +148,96 @@ fun CameraPreview(imageCapture: ImageCapture) {
     )
 }
 
-@SuppressLint("SetJavaScriptEnabled")
+@SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
-fun WebViewScreen(locationProvider: LocationProvider, networkStatusProvider: NetworkStatusProvider, imageCapture: ImageCapture) {
+fun WebViewScreen(
+    locationProvider: LocationProvider,
+    networkStatusProvider: NetworkStatusProvider,
+    imageCapture: ImageCapture
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope() // 用于 InspectionManager 的协程作用域
+
+    // 状态保持
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
-    val scope = rememberCoroutineScope()
 
+    // 1. 实例化 CameraHelper (依赖 context, imageCapture)
+    val cameraHelper = remember(context, imageCapture) {
+        CameraHelper(context, imageCapture)
+    }
+
+    val onImageSaved: (Uri) -> Unit = { uri ->
+        webView?.notifyJsUpdatePhoto(uri)
+    }
+
+    // 2. 实例化 InspectionManager (依赖 location, camera, scope)
+    // 使用 remember 确保重组时不会重复创建，除非依赖项改变
+    val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
+        InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved)
+    }
+
+    // 图片选择器的 Launcher
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             val script = "onImageSelected(\'$it\')"
-            webView?.post {
-                webView?.evaluateJavascript(script, null)
-            }
+            webView?.post { webView?.evaluateJavascript(script, null) }
         }
     }
 
+    // 3. 实例化 WebAppInterfaceImpl (依赖 InspectionManager)
+    // 这是为了满足新的构造函数签名
+    val webAppInterface = remember(inspectionManager, context, selectImageLauncher) {
+        WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher, onImageSaved)
+    }
+
+    // 生命周期管理：WebView 销毁时停止更新
     DisposableEffect(webView) {
         webView?.let {
             dashboardUpdater = DashboardUpdater(it, locationProvider, networkStatusProvider).apply { start() }
         }
         onDispose {
             dashboardUpdater?.stop()
+            // 如果需要在页面销毁时停止巡检，也可以在这里调用：
+            // inspectionManager.stopInspection()
         }
     }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
-        factory = { context ->
-            WebView(context).apply {
+        factory = { ctx ->
+            WebView(ctx).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
-                webViewClient = object: WebViewClient() {
+
+                webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-
-                        getLatestPhotoUri(context)?.let { uri ->
-                            displayLastestPhoto(uri, view)
+                        // 加载最后一张图片到 Web (如果有)
+                        getLatestPhotoUri(ctx)?.let {
+                            uri -> view?.notifyJsUpdatePhoto(uri)
                         }
                     }
                 }
                 loadUrl("file:///android_asset/index.html")
             }.also { webview ->
                 webView = webview
-                val onImageSavedCallback: (Uri) -> Unit = { uri ->
-                    displayLastestPhoto(uri, webview)
-                }
-                webview.addJavascriptInterface(WebAppInterfaceImpl(webview.context, selectImageLauncher, locationProvider, imageCapture, onImageSavedCallback, scope), "AndroidNative")
+                // 注入 Native 接口
+                webview.addJavascriptInterface(webAppInterface, "AndroidNative")
             }
         }
     )
 }
 
 private fun getLatestPhotoUri(context: Context): Uri? {
-    val collection =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        }
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+    } else {
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    }
 
     val projection = arrayOf(MediaStore.Images.Media._ID)
     val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
@@ -218,11 +250,4 @@ private fun getLatestPhotoUri(context: Context): Uri? {
         }
     }
     return null
-}
-
-private fun displayLastestPhoto(uri: Uri, webview: WebView?) {
-    val script = "updateLatestPhoto(\'$uri\')"
-    webview?.post {
-        webview.evaluateJavascript(script, null)
-    }
 }
