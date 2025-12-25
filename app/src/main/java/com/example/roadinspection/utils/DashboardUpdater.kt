@@ -1,21 +1,19 @@
 package com.example.roadinspection.utils
 
-import android.location.Location
 import android.webkit.WebView
-import com.example.roadinspection.data.model.DashboardData
+import com.example.roadinspection.data.model.HighFreqDashboardData
 import com.example.roadinspection.domain.location.LocationProvider
-import com.example.roadinspection.domain.network.NetworkStatus
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.google.gson.Gson
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
- * 负责持续向 WebView 更新仪表盘数据。
- * @param webView 需要接收数据的 WebView 实例。
- * @param locationProvider 位置数据提供者。
- * @param networkStatusProvider 网络状态提供者。
+ * 负责向 WebView 分发数据的更新器。
+ * 已重构为分离高频与低频数据流，减少 Bridge 通信压力。
  */
 class DashboardUpdater(
     private val webView: WebView,
@@ -23,61 +21,79 @@ class DashboardUpdater(
     private val networkStatusProvider: NetworkStatusProvider
 ) {
 
-    private val scope = CoroutineScope(Dispatchers.Main)
-    private var updateJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val gson = Gson()
 
     /**
-     * 开始监听所有数据流并发送给 WebView。
+     * 启动三个并行的数据监听任务
      */
     fun start() {
-        stop()
-        updateJob = scope.launch {
-            // 使用 combine 将多个 Flow 合并成一个
-            combine(
-                locationProvider.locationFlow,
-                locationProvider.gpsLevelFlow,
-                networkStatusProvider.networkStatusFlow,
-                locationProvider.distanceFlow
-            ) { location, gpsLevel, networkStatus, totalDist ->
-                // 每当任何一个 flow 发出新数据，这里就会被调用
-                location?.let {
-                    // 1. 基于所有真实数据创建 DashboardData 对象
-                    val realData = createDashboardData(it, gpsLevel, networkStatus, totalDist)
+        // 清理旧任务（如果有）
+        scope.coroutineContext.cancelChildren()
 
-                    // 2. 将数据对象转换为 JSON 字符串
-                    val jsonData = gson.toJson(realData)
+        // 1. 高频任务：位置 + 距离 + 时间
+        startHighFrequencyUpdates()
 
-                    // 3. 构建并执行 JavaScript 调用
-                    val script = "window.JSBridge.updateDashboard('$jsonData')"
-                    webView.evaluateJavascript(script, null)
-                }
-            }.collect() // 开始收集数据
-        }
-        // 启动位置监听 (网络监听是自动启动的)
+        // 2. 低频任务：GPS 信号强度
+        startGpsSignalUpdates()
+
+        // 3. 低频任务：网络状态
+        startNetworkStatusUpdates()
+
+        // 确保位置服务已开启
         locationProvider.startLocationUpdates()
     }
 
     /**
-     * 停止发送数据
+     * 停止所有更新任务
      */
     fun stop() {
-        updateJob?.cancel()
-        updateJob = null
+        scope.coroutineContext.cancelChildren()
     }
 
-    // --- 私有辅助方法 ---
+    private fun startHighFrequencyUpdates() {
+        scope.launch {
+            combine(
+                locationProvider.locationFlow,
+                locationProvider.distanceFlow
+            ) { location, totalDist ->
+                if (location != null) {
+                    val data = HighFreqDashboardData(
+                        timeDiff = location.time - System.currentTimeMillis(),
+                        lat = location.latitude,
+                        lng = location.longitude,
+                        totalDistance = totalDist
+                    )
+                    val jsonData = gson.toJson(data)
+                    "window.JSBridge.updateDashboard('$jsonData')"
+                } else {
+                    null
+                }
+            }.collectLatest { script ->
+                script?.let { webView.evaluateJavascript(it, null) }
+            }
+        }
+    }
 
-    private fun createDashboardData(location: Location, gpsLevel: Int, networkStatus: NetworkStatus, distance: Double): DashboardData {
-        return DashboardData(
-            timeDiff = location.time - System.currentTimeMillis(),
-            lat = location.latitude,
-            lng = location.longitude,
-            netType = networkStatus.networkType,
-            netLevel = networkStatus.signalLevel,
-            gpsLevel = gpsLevel,
-            totalDistance = distance,
-            // isInspecting = true
-        )
+    private fun startGpsSignalUpdates() {
+        scope.launch {
+            locationProvider.gpsLevelFlow
+                .collect { level ->
+                    val script = "window.JSBridge.updateGpsSignal($level)"
+                    webView.evaluateJavascript(script, null)
+                }
+        }
+    }
+
+    private fun startNetworkStatusUpdates() {
+        scope.launch {
+            networkStatusProvider.networkStatusFlow
+                .map { it.signalLevel } // 这里只提取强度，如果 JS 需要类型(5G/WIFI)，可改为传递完整对象
+                .distinctUntilChanged() // 关键：只有网络信号格数变化时才触发
+                .collect { level ->
+                    val script = "window.JSBridge.updateNetSignal($level)"
+                    webView.evaluateJavascript(script, null)
+                }
+        }
     }
 }

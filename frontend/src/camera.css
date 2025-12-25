@@ -114,7 +114,7 @@ body {
 .signal-display {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 4px;
 }
 .sig-row {

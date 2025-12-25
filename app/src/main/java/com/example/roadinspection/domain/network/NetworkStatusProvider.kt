@@ -9,19 +9,12 @@ import android.os.Build
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
+import com.example.roadinspection.data.model.NetworkStatus
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
-/**
- * 网络状态的数据模型
- * @param networkType 网络类型 (e.g., "WIFI", "5G", "4G", "N/A")
- * @param signalLevel 信号强度 [0-4]
- */
-data class NetworkStatus(
-    val networkType: String = "N/A",
-    val signalLevel: Int = 0
-)
+
 
 /**
  * 一个可复用的网络状态提供者
