@@ -36,6 +36,7 @@ import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.util.DashboardUpdater
 import com.example.roadinspection.util.GPSSignalUpdater
+import com.amap.api.services.core.ServiceSettings
 
 class MainActivity : ComponentActivity() {
 
@@ -58,6 +59,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        ServiceSettings.updatePrivacyShow(this, true, true)
+        ServiceSettings.updatePrivacyAgree(this, true)
 
         locationProvider = LocationProvider(this)
         networkStatusProvider = NetworkStatusProvider(this)
@@ -166,7 +170,7 @@ fun WebViewScreen(
 
     DisposableEffect(webView) {
         webView?.let {
-            dashboardUpdater = DashboardUpdater(it, locationProvider, gpsSignalUpdater, networkStatusProvider).apply { start() }
+            dashboardUpdater = DashboardUpdater(it, locationProvider, gpsSignalUpdater, networkStatusProvider, it.context).apply { start() }
         }
         onDispose {
             dashboardUpdater?.stop()

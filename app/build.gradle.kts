@@ -11,7 +11,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.greetingcard"
+        applicationId = "com.example.roadinspection"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
@@ -58,6 +58,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.huawei.hms:base:6.11.0.300")
     implementation("com.huawei.hms:location:6.9.0.300")
+    implementation("com.amap.api:search:9.7.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
