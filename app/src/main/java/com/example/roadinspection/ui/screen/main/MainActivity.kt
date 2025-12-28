@@ -34,8 +34,8 @@ import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
-import com.example.roadinspection.util.DashboardUpdater
-import com.example.roadinspection.util.GPSSignalUpdater
+import com.example.roadinspection.utils.DashboardUpdater
+import com.example.roadinspection.utils.GPSSignalUpdater
 
 class MainActivity : ComponentActivity() {
 
