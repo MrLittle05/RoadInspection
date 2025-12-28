@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import android.webkit.JavascriptInterface
-import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import com.example.roadinspection.domain.inspection.InspectionManager
@@ -16,8 +15,7 @@ import com.example.roadinspection.domain.inspection.InspectionManager
 class WebAppInterfaceImpl(
     private val inspectionManager: InspectionManager,
     private val context: Context,
-    private val selectImageLauncher: ActivityResultLauncher<String>,
-    private val onImageSaved: (Uri) -> Unit,
+    private val selectImageLauncher: ActivityResultLauncher<String>
 ) : WebAppInterface {
 
     @JavascriptInterface
@@ -34,11 +32,7 @@ class WebAppInterfaceImpl(
 
     @JavascriptInterface
     override fun manualCapture() {
-        inspectionManager.manualCapture { savedUri ->
-            onImageSaved(savedUri)
-            showToast("手动拍照成功")
-            Log.d("WebAppInterface", "收到回调：手动拍照成功！URI: $savedUri")
-        }
+        inspectionManager.manualCapture()
     }
 
     @JavascriptInterface

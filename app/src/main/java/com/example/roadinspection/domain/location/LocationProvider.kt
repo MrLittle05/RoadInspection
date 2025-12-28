@@ -11,7 +11,6 @@ import androidx.core.content.ContextCompat
 import com.example.roadinspection.utils.KalmanLatLong
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
 
@@ -22,16 +21,15 @@ import kotlin.math.abs
 class LocationProvider(private val context: Context) {
 
     private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
-    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     // 实例化卡尔曼滤波器
     private val kalmanFilter = KalmanLatLong(baseQ_metres_per_second = 4.0f)
 
     private val _locationState = MutableStateFlow<Location?>(null)
-    val locationFlow: StateFlow<Location?> = _locationState
+    val locationFlow = _locationState.asStateFlow()
 
     private val _gpsLevelState = MutableStateFlow(0)
-    val gpsLevelFlow: StateFlow<Int> = _gpsLevelState
+    val gpsLevelFlow = _gpsLevelState.asStateFlow()
 
     private val _distanceState = MutableStateFlow(0.0)
     val distanceFlow = _distanceState.asStateFlow()
@@ -42,6 +40,41 @@ class LocationProvider(private val context: Context) {
     // [新增] 预热计数器：忽略冷启动或恢复后的前10个点
     private var warmUpCounter = 0
     private val WARM_UP_COUNT = 10
+
+    @SuppressLint("MissingPermission")
+    fun startLocationUpdates() {
+        // [关键修复] 每次开始定位都强制预热，防止刚打开时的乱跳
+        warmUpCounter = WARM_UP_COUNT
+
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+            .setWaitForAccurateLocation(false)
+            .setMinUpdateIntervalMillis(500)
+            .setMaxUpdateDelayMillis(1000)
+            .build()
+
+        try {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
+    fun stopLocationUpdates() {
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+    }
+
+    fun resetDistanceCounter() {
+        _distanceState.value = 0.0
+        lastValidLocation = null
+        kalmanFilter.reset()
+        // [关键修复] 重置里程时也要预热
+        warmUpCounter = WARM_UP_COUNT
+        isRecordingDistance = true
+    }
+
+    fun stopDistanceCounter() {
+        isRecordingDistance = false
+    }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -79,70 +112,6 @@ class LocationProvider(private val context: Context) {
                 updateDistance(filteredLocation)
             }
         }
-    }
-
-    private val gnssStatusCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-        object : GnssStatus.Callback() {
-            override fun onSatelliteStatusChanged(status: GnssStatus) {
-                super.onSatelliteStatusChanged(status)
-                var satellitesWithGoodSignal = 0
-                for (i in 0 until status.satelliteCount) {
-                    if (status.getCn0DbHz(i) > 30) satellitesWithGoodSignal++
-                }
-                _gpsLevelState.value = when {
-                    satellitesWithGoodSignal >= 10 -> 4
-                    satellitesWithGoodSignal >= 7 -> 3
-                    satellitesWithGoodSignal >= 4 -> 2
-                    satellitesWithGoodSignal > 0 -> 1
-                    else -> 0
-                }
-            }
-        }
-    } else {
-        null
-    }
-
-    @SuppressLint("MissingPermission")
-    fun startLocationUpdates() {
-        // [关键修复] 每次开始定位都强制预热，防止刚打开时的乱跳
-        warmUpCounter = WARM_UP_COUNT
-
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setWaitForAccurateLocation(false)
-            .setMinUpdateIntervalMillis(500)
-            .setMaxUpdateDelayMillis(1000)
-            .build()
-
-        try {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-            if (gnssStatusCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                locationManager.registerGnssStatusCallback(ContextCompat.getMainExecutor(context), gnssStatusCallback)
-            } else if (gnssStatusCallback != null) {
-                locationManager.registerGnssStatusCallback(gnssStatusCallback)
-            }
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
-    }
-
-    fun stopLocationUpdates() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && gnssStatusCallback != null) {
-            locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
-        }
-    }
-
-    fun resetDistanceCounter() {
-        _distanceState.value = 0.0
-        lastValidLocation = null
-        kalmanFilter.reset()
-        // [关键修复] 重置里程时也要预热
-        warmUpCounter = WARM_UP_COUNT
-        isRecordingDistance = true
-    }
-
-    fun stopDistanceCounter() {
-        isRecordingDistance = false
     }
 
     private fun updateDistance(filteredCurrent: Location) {

@@ -56,7 +56,7 @@ class InspectionManager(
                     lastCaptureDistance = totalDistance
 
                     cameraHelper.takePhoto(
-                        true,
+                        isAuto = true,
                         onSuccess = {savedUri -> onImageSaved(savedUri)},
                         onError = { Log.e("Manager", "Auto capture failed: $it") }
                     )
@@ -65,7 +65,11 @@ class InspectionManager(
         }
     }
 
-    fun manualCapture(callback: (Uri) -> Unit) {
-        cameraHelper.takePhoto(false, onSuccess = callback, onError = {})
+    fun manualCapture() {
+        cameraHelper.takePhoto(
+            isAuto = false,
+            onSuccess = {savedUri -> onImageSaved(savedUri)},
+            onError = {Log.e("Manager", "Manual capture failed: $it")}
+        )
     }
 }

@@ -30,9 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.inspection.InspectionManager
+import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
@@ -44,12 +46,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var locationProvider: LocationProvider
     private lateinit var networkStatusProvider: NetworkStatusProvider
 
+    private lateinit var gpsSignalProvider: GpsSignalProvider
+
     // 权限请求启动器
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            locationProvider.startLocationUpdates()
+            startTrackingServices()
         }
         Log.d("Permissions", "Permissions granted: $permissions")
     }
@@ -58,8 +62,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // 使用 applicationContext 防止内存泄漏
-        locationProvider = LocationProvider(applicationContext)
-        networkStatusProvider = NetworkStatusProvider(applicationContext)
+        this.locationProvider = LocationProvider(applicationContext)
+        this.networkStatusProvider = NetworkStatusProvider(applicationContext)
+        this.gpsSignalProvider = GpsSignalProvider(applicationContext)
 
         // 启动时请求权限
         val permissions = mutableListOf(
@@ -79,7 +84,9 @@ class MainActivity : ComponentActivity() {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
-        requestPermissionLauncher.launch(permissions.toTypedArray())
+        if (!hasPermissions()) {
+            requestPermissionLauncher.launch(permissions.toTypedArray())
+        }
 
         setContent {
             GreetingCardTheme {
@@ -87,17 +94,48 @@ class MainActivity : ComponentActivity() {
                 val imageCapture = remember { ImageCapture.Builder().build() }
 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    CameraPreview(imageCapture)
-                    // 将 locationProvider 等传递给 UI 层
-                    WebViewScreen(locationProvider, networkStatusProvider, imageCapture)
+                    CameraPreview(imageCapture = imageCapture)
+                    WebViewScreen(
+                        locationProvider = locationProvider,
+                        gpsSignalProvider = gpsSignalProvider,
+                        networkStatusProvider = networkStatusProvider,
+                        imageCapture = imageCapture)
                 }
             }
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        if (locationProvider.isRecordingDistance) return
+        stopTrackingServices()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (hasPermissions()) startTrackingServices()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        stopTrackingServices()
+    }
+
+
+    private fun startTrackingServices() {
+        locationProvider.startLocationUpdates()
+        gpsSignalProvider.startGpsSignalUpdates()
+    }
+
+    private fun stopTrackingServices() {
         locationProvider.stopLocationUpdates()
+        gpsSignalProvider.stopGpsSignalUpdates()
+    }
+
+    private fun hasPermissions(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 }
 
@@ -152,6 +190,7 @@ fun CameraPreview(imageCapture: ImageCapture) {
 @Composable
 fun WebViewScreen(
     locationProvider: LocationProvider,
+    gpsSignalProvider: GpsSignalProvider,
     networkStatusProvider: NetworkStatusProvider,
     imageCapture: ImageCapture
 ) {
@@ -162,7 +201,7 @@ fun WebViewScreen(
     var webView: WebView? by remember { mutableStateOf(null) }
     var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
 
-    // 1. 实例化 CameraHelper (依赖 context, imageCapture)
+    // 1. 实例化 CameraHelper
     val cameraHelper = remember(context, imageCapture) {
         CameraHelper(context, imageCapture)
     }
@@ -171,7 +210,7 @@ fun WebViewScreen(
         webView?.notifyJsUpdatePhoto(uri)
     }
 
-    // 2. 实例化 InspectionManager (依赖 location, camera, scope)
+    // 2. 实例化 InspectionManager
     // 使用 remember 确保重组时不会重复创建，除非依赖项改变
     val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
         InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved)
@@ -185,16 +224,15 @@ fun WebViewScreen(
         }
     }
 
-    // 3. 实例化 WebAppInterfaceImpl (依赖 InspectionManager)
-    // 这是为了满足新的构造函数签名
+    // 3. 实例化 WebAppInterfaceImpl
     val webAppInterface = remember(inspectionManager, context, selectImageLauncher) {
-        WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher, onImageSaved)
+        WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher)
     }
 
     // 生命周期管理：WebView 销毁时停止更新
     DisposableEffect(webView) {
         webView?.let {
-            dashboardUpdater = DashboardUpdater(it, locationProvider, networkStatusProvider).apply { start() }
+            dashboardUpdater = DashboardUpdater(it, locationProvider, gpsSignalProvider, networkStatusProvider)
         }
         onDispose {
             dashboardUpdater?.stop()
@@ -216,6 +254,10 @@ fun WebViewScreen(
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
+
+                        // 开始更新仪表盘数据
+                        dashboardUpdater?.start()
+
                         // 加载最后一张图片到 Web (如果有)
                         getLatestPhotoUri(ctx)?.let {
                             uri -> view?.notifyJsUpdatePhoto(uri)

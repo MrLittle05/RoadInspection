@@ -2,6 +2,7 @@ package com.example.roadinspection.utils
 
 import android.webkit.WebView
 import com.example.roadinspection.data.model.HighFreqDashboardData
+import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.google.gson.Gson
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.map
 class DashboardUpdater(
     private val webView: WebView,
     private val locationProvider: LocationProvider,
+    private val gpsSignalProvider: GpsSignalProvider,
     private val networkStatusProvider: NetworkStatusProvider
 ) {
 
@@ -35,7 +37,7 @@ class DashboardUpdater(
         startHighFrequencyUpdates()
 
         // 2. 低频任务：GPS 信号强度
-        startGpsLevelUpdates()
+        startGpsStatusUpdates()
 
         // 3. 低频任务：网络状态
         startNetworkStatusUpdates()
@@ -75,9 +77,9 @@ class DashboardUpdater(
         }
     }
 
-    private fun startGpsLevelUpdates() {
+    private fun startGpsStatusUpdates() {
         scope.launch {
-            locationProvider.gpsLevelFlow
+            gpsSignalProvider.gpsLevelFlow
                 .collect { level ->
                     val script = "window.JSBridge.updateGpsLevel($level)"
                     webView.evaluateJavascript(script, null)
