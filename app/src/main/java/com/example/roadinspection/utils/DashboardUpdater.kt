@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.map
 
 /**
  * 负责向 WebView 分发数据的更新器。
- * 已重构为分离高频与低频数据流，减少 Bridge 通信压力。
+ * 架构：保留 HEAD 的响应式流设计
+ * 功能：集成 Master 的地址更新 (通过 Location Extras)
  */
 class DashboardUpdater(
     private val webView: WebView,
@@ -26,15 +27,17 @@ class DashboardUpdater(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val gson = Gson()
 
+    // 用于去重，防止相同地址重复发给 JS 浪费性能
+    private var lastSentAddress: String? = null
+
     /**
-     * 启动并行的数据监听任务，更新前端仪表盘数据
+     * 启动并行的数据监听任务
      */
     fun start() {
-        // 清理旧任务（如果有）
         scope.coroutineContext.cancelChildren()
 
-        // 1. 高频任务：位置 + 距离 + 时间
-        startHighFrequencyUpdates()
+        // 1. 高频任务：位置 + 距离 + 地址
+        startLocationDataUpdates()
 
         // 2. 低频任务：GPS 信号强度
         startGpsStatusUpdates()
@@ -42,37 +45,46 @@ class DashboardUpdater(
         // 3. 低频任务：网络状态
         startNetworkStatusUpdates()
 
-        // 确保位置服务已开启
         locationProvider.startLocationUpdates()
     }
 
-    /**
-     * 停止所有更新任务
-     */
     fun stop() {
         scope.coroutineContext.cancelChildren()
     }
 
-    private fun startHighFrequencyUpdates() {
+    private fun startLocationDataUpdates() {
         scope.launch {
             combine(
                 locationProvider.locationFlow,
                 locationProvider.distanceFlow
             ) { location, totalDist ->
                 if (location != null) {
+                    // 1. 构建仪表盘数据
                     val data = HighFrequencyData(
                         timeDiff = location.time - System.currentTimeMillis(),
                         lat = location.latitude,
                         lng = location.longitude,
                         totalDistance = totalDist
                     )
-                    val jsonData = gson.toJson(data)
-                    "window.JSBridge.updateDashboard('$jsonData')"
+
+                    // 2. 提取地址 (来自 AmapLocationProvider 放入的 Bundle)
+                    val address = location.extras?.getString("address") ?: "正在定位..."
+
+                    Pair(gson.toJson(data), address)
                 } else {
                     null
                 }
-            }.collectLatest { script ->
-                script?.let { webView.evaluateJavascript(it, null) }
+            }.collectLatest { pair ->
+                pair?.let { (jsonData, address) ->
+                    // 发送仪表盘数据 (高频)
+                    webView.evaluateJavascript("window.JSBridge.updateDashboard('$jsonData')", null)
+
+                    // 发送地址数据 (仅当变化时发送，优化性能)
+                    if (address != lastSentAddress) {
+                        lastSentAddress = address
+                        webView.evaluateJavascript("window.JSBridge.updateAddress('$address')", null)
+                    }
+                }
             }
         }
     }
@@ -90,10 +102,10 @@ class DashboardUpdater(
     private fun startNetworkStatusUpdates() {
         scope.launch {
             networkStatusProvider.networkStatusFlow
-                .map { it.signalLevel } // 这里只提取强度，如果 JS 需要类型(5G/WIFI)，可改为传递完整对象
-                .distinctUntilChanged() // 只有网络信号状态变化时才触发
+                .map { it.signalLevel }
+                .distinctUntilChanged()
                 .collect { level ->
-                    val script = "window.JSBridge.updateNetLevel($level)"
+                    val script = "window.JSBridge.updateNetSignal($level)"
                     webView.evaluateJavascript(script, null)
                 }
         }

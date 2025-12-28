@@ -3,31 +3,19 @@ package com.example.roadinspection.domain.location
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
-import android.os.Looper
 import com.example.roadinspection.utils.KalmanLatLong
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
-import com.google.android.gms.location.LocationCallback as GmsLocationCallback
-import com.google.android.gms.location.LocationRequest as GmsLocationRequest
-import com.google.android.gms.location.LocationResult as GmsLocationResult
-import com.google.android.gms.location.LocationServices as GmsLocationServices
-import com.google.android.gms.location.Priority as GmsPriority
-import com.huawei.hms.api.HuaweiApiAvailability
-import com.huawei.hms.location.LocationCallback as HmsLocationCallback
-import com.huawei.hms.location.LocationRequest as HmsLocationRequest
-import com.huawei.hms.location.LocationResult as HmsLocationResult
-import com.huawei.hms.location.LocationServices as HmsLocationServices
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
 
 /**
- * 道路巡检核心定位服务
- * 结合了 HEAD 的 Kalman 滤波算法与 master 的 HMS/GMS 多渠道支持
+ * 道路巡检核心定位服务 (Resolved)
+ * 架构：HEAD (Kalman Filter + Flow)
+ * 引擎：Master (Amap 高德定位)
  */
 class LocationProvider(private val context: Context) {
 
-    // 实例化卡尔曼滤波器 (来自 HEAD)
+    // 1. 实例化卡尔曼滤波器 (保留 HEAD 的算法)
     private val kalmanFilter = KalmanLatLong(baseQ_metres_per_second = 4.0f)
 
     private val _locationState = MutableStateFlow<Location?>(null)
@@ -39,34 +27,30 @@ class LocationProvider(private val context: Context) {
     private var lastValidLocation: Location? = null
     var isRecordingDistance = false
 
-    // 预热计数器 (来自 HEAD)
+    // 预热计数器
     private var warmUpCounter = 0
     private val WARM_UP_COUNT = 10
 
-    // 抽象定位提供者 (来自 master)
+    // 2. 使用 Master 引入的高德定位提供者
+    // 这里的 LocationUpdateProvider 需要在下方定义
     private val locationUpdateProvider: LocationUpdateProvider
 
     init {
-        // 定义统一的回调入口：无论来自 GMS 还是 HMS，都走这里
+        // 定义统一回调：从高德拿到原始数据 -> 送入卡尔曼滤波
         val onLocationResult: (Location) -> Unit = { rawLocation ->
-            processLocation(rawLocation)
-        }
-
-        locationUpdateProvider = if (isGmsAvailable()) {
-            GmsLocationProvider(context, onLocationResult)
-        } else if (isHmsAvailable()) {
-            HmsLocationProvider(context, onLocationResult)
-        } else {
-            object : LocationUpdateProvider {
-                override fun startLocationUpdates() {}
-                override fun stopLocationUpdates() {}
+            // 过滤掉经纬度为 0 的无效数据
+            if (rawLocation.latitude != 0.0 || rawLocation.longitude != 0.0) {
+                processLocation(rawLocation)
             }
         }
+
+        // 初始化高德定位 (Master 的改动)
+        // 注意：AmapLocationProvider 必须实现 LocationUpdateProvider 接口
+        locationUpdateProvider = AmapLocationProvider(context, onLocationResult)
     }
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
-        // [关键修复] 每次开始定位都强制预热
         warmUpCounter = WARM_UP_COUNT
         locationUpdateProvider.startLocationUpdates()
     }
@@ -88,7 +72,7 @@ class LocationProvider(private val context: Context) {
     }
 
     /**
-     * 核心处理逻辑 (来自 HEAD 的算法)
+     * 核心算法处理 (HEAD 的逻辑)
      */
     private fun processLocation(rawLocation: Location) {
         // 1. 过滤陈旧数据 (>10秒前的缓存不要)
@@ -114,9 +98,15 @@ class LocationProvider(private val context: Context) {
             bearing = rawLocation.bearing
             altitude = rawLocation.altitude
             elapsedRealtimeNanos = rawLocation.elapsedRealtimeNanos
+
+            // [关键合并点] 复制原始数据中的地址信息 (Master 的功能)
+            // AmapLocationProvider 已经把地址塞进了 extras
+            if (rawLocation.extras != null) {
+                extras = rawLocation.extras
+            }
         }
 
-        // 更新 UI
+        // 更新 UI Flow
         _locationState.value = filteredLocation
 
         if (isRecordingDistance) {
@@ -125,13 +115,11 @@ class LocationProvider(private val context: Context) {
     }
 
     private fun updateDistance(filteredCurrent: Location) {
-        // 预热期保护
+        // (保留 HEAD 的防漂移距离计算逻辑)
         if (warmUpCounter > 0) {
             warmUpCounter--
             return
         }
-
-        // 静止过滤
         if (filteredCurrent.hasSpeed() && filteredCurrent.speed < 0.5f) {
             return
         }
@@ -142,7 +130,6 @@ class LocationProvider(private val context: Context) {
         val previous = lastValidLocation!!
         val timeDeltaMs = abs(filteredCurrent.time - previous.time)
 
-        // 断层保护
         if (timeDeltaMs > 10_000) {
             lastValidLocation = filteredCurrent
             warmUpCounter = 5
@@ -152,7 +139,6 @@ class LocationProvider(private val context: Context) {
         val distanceDelta = previous.distanceTo(filteredCurrent)
 
         if (distanceDelta > 0.5f) {
-            // 瞬移保护
             val calculatedSpeed = if (timeDeltaMs > 0) distanceDelta / (timeDeltaMs / 1000.0) else 0.0
             if (calculatedSpeed > 40.0 && (!filteredCurrent.hasSpeed() || filteredCurrent.speed < 30.0)) {
                 lastValidLocation = filteredCurrent
@@ -163,82 +149,9 @@ class LocationProvider(private val context: Context) {
             lastValidLocation = filteredCurrent
         }
     }
-
-    // --- Master 分支的 GMS/HMS 辅助类 ---
-
-    private fun isGmsAvailable(): Boolean {
-        return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
-    }
-
-    private fun isHmsAvailable(): Boolean {
-        return HuaweiApiAvailability.getInstance().isHuaweiMobileServicesAvailable(context) == com.huawei.hms.api.ConnectionResult.SUCCESS
-    }
 }
 
-// 定义接口 (来自 Master)
-private interface LocationUpdateProvider {
+interface LocationUpdateProvider {
     fun startLocationUpdates()
     fun stopLocationUpdates()
-}
-
-// GMS 实现 (来自 Master)
-private class GmsLocationProvider(
-    private val context: Context,
-    private val onLocationResult: (Location) -> Unit
-) : LocationUpdateProvider {
-    private val fusedLocationClient = GmsLocationServices.getFusedLocationProviderClient(context)
-    private val locationCallback = object : GmsLocationCallback() {
-        override fun onLocationResult(locationResult: GmsLocationResult) {
-            locationResult.lastLocation?.let(onLocationResult)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    override fun startLocationUpdates() {
-        val locationRequest = GmsLocationRequest.Builder(GmsPriority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setWaitForAccurateLocation(false)
-            .setMinUpdateIntervalMillis(500)
-            .setMaxUpdateDelayMillis(1000)
-            .build()
-        try {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
-    }
-
-    override fun stopLocationUpdates() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-    }
-}
-
-// HMS 实现 (来自 Master)
-private class HmsLocationProvider(
-    private val context: Context,
-    private val onLocationResult: (Location) -> Unit
-) : LocationUpdateProvider {
-    private val fusedLocationClient = HmsLocationServices.getFusedLocationProviderClient(context)
-    private val locationCallback = object : HmsLocationCallback() {
-        override fun onLocationResult(locationResult: HmsLocationResult) {
-            locationResult.lastLocation?.let(onLocationResult)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    override fun startLocationUpdates() {
-        val locationRequest = HmsLocationRequest.create().apply {
-            priority = HmsLocationRequest.PRIORITY_HIGH_ACCURACY
-            interval = 1000
-            fastestInterval = 500
-        }
-        try {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
-    }
-
-    override fun stopLocationUpdates() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-    }
 }

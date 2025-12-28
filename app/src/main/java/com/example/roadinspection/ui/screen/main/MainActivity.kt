@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.amap.api.services.core.ServiceSettings
 import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.inspection.InspectionManager
@@ -47,7 +48,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var networkStatusProvider: NetworkStatusProvider
     private lateinit var gpsSignalProvider: GpsSignalProvider
 
-    // 权限请求启动器
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -60,7 +60,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 使用 applicationContext 防止内存泄漏
+        // [Master 合并] 高德地图隐私合规接口 (必须在初始化之前调用)
+        ServiceSettings.updatePrivacyShow(this, true, true)
+        ServiceSettings.updatePrivacyAgree(this, true)
+
+        // [HEAD 合并] 使用 ApplicationContext 避免内存泄漏
         this.locationProvider = LocationProvider(applicationContext)
         this.networkStatusProvider = NetworkStatusProvider(applicationContext)
         this.gpsSignalProvider = GpsSignalProvider(applicationContext)
@@ -75,7 +79,6 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.RECORD_AUDIO
         )
 
-        // 适配 Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -104,6 +107,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ... (onStop, onStart, onDestroy 保持不变) ...
     override fun onStop() {
         super.onStop()
         if (locationProvider.isRecordingDistance) return
@@ -137,6 +141,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// ... (CameraPreview 保持不变) ...
 @Composable
 fun CameraPreview(imageCapture: ImageCapture) {
     val context = LocalContext.current
@@ -193,38 +198,32 @@ fun WebViewScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // 1. 实例化 CameraHelper
+    // CameraHelper
     val cameraHelper = remember(context, imageCapture) {
         CameraHelper(context, imageCapture)
     }
 
-    // 保存 WebView 的引用，用于 onImageSaved 回调
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
     val onImageSaved: (Uri) -> Unit = { uri ->
         webViewRef?.notifyJsUpdatePhoto(uri)
     }
 
-    // 2. 实例化 InspectionManager
-    // 使用 remember 确保重组时不会重复创建，除非依赖项改变
+    // InspectionManager
     val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
         InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved)
     }
 
-    // 图片选择器的 Launcher
+    // Image Launcher
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-
-        }
+        // Handle image selection if needed
     }
 
-    // 3. 实例化 WebAppInterfaceImpl
+    // WebAppInterface
     val webAppInterface = remember(inspectionManager, context, selectImageLauncher) {
         WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher)
     }
 
-    // 使用 State 来持有 updater 以便在 onDispose 中清理，
-    // 但初始化的工作移交给 factory
+    // DashboardUpdater Ref
     val dashboardUpdaterRef = remember { mutableStateOf<DashboardUpdater?>(null) }
 
     AndroidView(
@@ -237,18 +236,14 @@ fun WebViewScreen(
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
 
-                // 直接创建 DashboardUpdater，确保非空
+                // 创建 Updater
                 val updater = DashboardUpdater(this, locationProvider, gpsSignalProvider, networkStatusProvider)
-                dashboardUpdaterRef.value = updater // 保存引用给 DisposableEffect 用
+                dashboardUpdaterRef.value = updater
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-
-                        // 直接使用局部变量 updater，保证它一定存在
                         updater.start()
-
-                        // 加载最后一张图片
                         getLatestPhotoUri(ctx)?.let { uri ->
                             view?.notifyJsUpdatePhoto(uri)
                         }
@@ -260,10 +255,12 @@ fun WebViewScreen(
             }.also {
                 webViewRef = it
             }
-        }
+        },
+        // [Compose 优化] 确保重组时不会重新加载 URL
+        update = { }
     )
 
-    // 生命周期管理：只负责清理
+    // 清理资源
     DisposableEffect(Unit) {
         onDispose {
             dashboardUpdaterRef.value?.stop()
@@ -271,6 +268,7 @@ fun WebViewScreen(
     }
 }
 
+// ... (getLatestPhotoUri 保持不变) ...
 private fun getLatestPhotoUri(context: Context): Uri? {
     val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
