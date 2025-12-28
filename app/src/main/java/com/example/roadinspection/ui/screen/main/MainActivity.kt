@@ -45,7 +45,6 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var locationProvider: LocationProvider
     private lateinit var networkStatusProvider: NetworkStatusProvider
-
     private lateinit var gpsSignalProvider: GpsSignalProvider
 
     // 权限请求启动器
@@ -90,7 +89,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GreetingCardTheme {
-                // ImageCapture 保持在 Compose 作用域内
                 val imageCapture = remember { ImageCapture.Builder().build() }
 
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -99,7 +97,8 @@ class MainActivity : ComponentActivity() {
                         locationProvider = locationProvider,
                         gpsSignalProvider = gpsSignalProvider,
                         networkStatusProvider = networkStatusProvider,
-                        imageCapture = imageCapture)
+                        imageCapture = imageCapture
+                    )
                 }
             }
         }
@@ -120,7 +119,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         stopTrackingServices()
     }
-
 
     private fun startTrackingServices() {
         locationProvider.startLocationUpdates()
@@ -157,9 +155,7 @@ fun CameraPreview(imageCapture: ImageCapture) {
             val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build()
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
             preview.setSurfaceProvider(previewView.surfaceProvider)
-
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageCapture)
@@ -241,7 +237,7 @@ fun WebViewScreen(
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
 
-                // 【关键修改】在此处直接创建 DashboardUpdater，确保非空
+                // 直接创建 DashboardUpdater，确保非空
                 val updater = DashboardUpdater(this, locationProvider, gpsSignalProvider, networkStatusProvider)
                 dashboardUpdaterRef.value = updater // 保存引用给 DisposableEffect 用
 
@@ -249,12 +245,11 @@ fun WebViewScreen(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
 
-                        // 【关键修改】直接使用局部变量 updater，保证它一定存在
+                        // 直接使用局部变量 updater，保证它一定存在
                         updater.start()
 
                         // 加载最后一张图片
                         getLatestPhotoUri(ctx)?.let { uri ->
-                            Log.d("WebViewScreen", "Found latest photo: $uri")
                             view?.notifyJsUpdatePhoto(uri)
                         }
                     }
@@ -271,10 +266,7 @@ fun WebViewScreen(
     // 生命周期管理：只负责清理
     DisposableEffect(Unit) {
         onDispose {
-            Log.d("WebViewScreen", "Stopping dashboard updater")
             dashboardUpdaterRef.value?.stop()
-            // 如果需要停止巡检：
-            // inspectionManager.stopInspection()
         }
     }
 }
@@ -285,10 +277,8 @@ private fun getLatestPhotoUri(context: Context): Uri? {
     } else {
         MediaStore.Images.Media.EXTERNAL_CONTENT_URI
     }
-
     val projection = arrayOf(MediaStore.Images.Media._ID)
     val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-
     context.contentResolver.query(collection, projection, null, null, sortOrder)?.use { cursor ->
         if (cursor.moveToFirst()) {
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)

@@ -57,7 +57,7 @@ dependencies {
     implementation(libs.gson)
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.huawei.hms:base:6.11.0.300")
-    implementation("com.huawei.hms:location:6.9.0.300")
+    implementation("com.huawei.hms:location:6.16.0.302")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -65,4 +65,36 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+// === 粘贴在 app/build.gradle.kts 的最末尾 ===
+
+tasks.register("findSoFile") {
+    doLast {
+        println("\n========== 🕵️‍♂️ KTS版(最终修正)：开始全库搜查 libTransform.so 🕵️‍♂️ ==========")
+
+        val config = project.configurations.findByName("debugRuntimeClasspath")
+
+        config?.files?.forEach { file ->
+            try {
+                if (file.name.endsWith(".aar") || file.name.endsWith(".jar")) {
+                    // 修正点：visit 后面直接跟花括号，不要写 'details ->'
+                    project.zipTree(file).visit {
+                        // 在这里，'this' 就是文件详情对象
+                        // 直接访问 'name' 和 'relativePath' 属性即可
+                        if (this.name.contains("libTransform.so")) {
+                            println("\n🔥🔥🔥 抓到了！🔥🔥🔥")
+                            println("藏身之处 (库名):  ${file.name}")
+                            println("文件详细路径: ${file.absolutePath}")
+                            println("SO文件内部路径: ${this.relativePath}")
+                            println("----------------------------------------------")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // 忽略读取错误的包
+            }
+        }
+        println("========== 搜查结束 ==========\n")
+    }
 }
