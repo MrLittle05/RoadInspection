@@ -2,6 +2,7 @@ package com.example.roadinspection.domain.location
 
 import android.content.Context
 import android.location.Location
+import android.util.Log
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
 import com.amap.api.location.AMapLocationListener
@@ -19,6 +20,7 @@ class AmapLocationProvider(
 
         // 配置定位参数
         val locationOption = AMapLocationClientOption().apply {
+            locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
             isNeedAddress = true // 👈 改为 true，让定位直接返回地址
             interval = 1000 // 依然保持1秒定位一次
         }
@@ -34,7 +36,7 @@ class AmapLocationProvider(
                     accuracy = amapLocation.accuracy
                     time = amapLocation.time
                     speed = amapLocation.speed
-
+                    elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
                     // 将地址字符串存入 Bundle，传给 LocationProvider
                     val bundle = android.os.Bundle()
                     bundle.putString("address", amapLocation.address)
@@ -43,6 +45,11 @@ class AmapLocationProvider(
 
                 // 关键：调用这个回调，数据才会进入 LocationProvider 的 flow
                 onLocationResult(location)
+            } else {
+                Log.e("AmapError",
+                    "定位失败, ErrCode: ${amapLocation.errorCode}, " +
+                            "ErrInfo: ${amapLocation.errorInfo}"
+                )
             }
         }
     }

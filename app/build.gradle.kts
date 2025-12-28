@@ -11,7 +11,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.greetingcard"
+        applicationId = "com.example.roadinspection"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
