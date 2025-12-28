@@ -9,7 +9,7 @@ package com.example.roadinspection.data.model
  * @property lng 经度。
  * @property totalDistance 本次巡检累计移动距离 (单位：米)。
  */
-data class HighFreqDashboardData(
+data class HighFrequencyData(
     val timeDiff: Long = 0L,
     val lat: Double = 0.0,
     val lng: Double = 0.0,

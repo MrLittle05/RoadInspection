@@ -1,7 +1,7 @@
 package com.example.roadinspection.utils
 
 import android.webkit.WebView
-import com.example.roadinspection.data.model.HighFreqDashboardData
+import com.example.roadinspection.data.model.HighFrequencyData
 import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
@@ -60,7 +60,7 @@ class DashboardUpdater(
                 locationProvider.distanceFlow
             ) { location, totalDist ->
                 if (location != null) {
-                    val data = HighFreqDashboardData(
+                    val data = HighFrequencyData(
                         timeDiff = location.time - System.currentTimeMillis(),
                         lat = location.latitude,
                         lng = location.longitude,
