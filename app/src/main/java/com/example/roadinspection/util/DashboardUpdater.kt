@@ -11,7 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import com.example.roadinspection.domain.location.AddressProvider
+//import com.example.roadinspection.domain.location.AddressProvider
 import android.content.Context
 
 /**
@@ -29,15 +29,15 @@ class DashboardUpdater(
     private val scope = CoroutineScope(Dispatchers.Main)
     private var updateJob: Job? = null
     private val gson = Gson()
-    private val addressProvider = AddressProvider(context)
-
-    // 定义一个变量存上次查地址的时间
-    private var lastAddressRequestTime: Long = 0
-    // 定义一个变量存当前的地址缓存 (避免查不到时显示空)
-    private var cachedAddress: String = "正在获取地址..."
-
-    // 设置地址更新间隔 (毫秒)，这里设为 4000ms (4秒)
-    private val ADDRESS_UPDATE_INTERVAL = 4000L
+//    private val addressProvider = AddressProvider(context)
+//
+//    // 定义一个变量存上次查地址的时间
+//    private var lastAddressRequestTime: Long = 0
+//    // 定义一个变量存当前的地址缓存 (避免查不到时显示空)
+//    private var cachedAddress: String = "正在获取地址..."
+//
+//    // 设置地址更新间隔 (毫秒)，这里设为 4000ms (4秒)
+//    private val ADDRESS_UPDATE_INTERVAL = 4000L
 
     fun start() {
         stop()
@@ -46,10 +46,10 @@ class DashboardUpdater(
             launch {
                 locationProvider.locationFlow.collect { location ->
                     location?.let {
-                        // 1. 提取地址字符串 (从 Location 的 extras 中获取)
-                        val addressStr = it.extras?.getString("address") ?: "正在获取地址..."
+                        // 从 extras 中提取地址
+                        val addressStr = it.extras?.getString("address") ?: "获取位置中..."
 
-                        // 2. 构建经纬度 JSON 对象
+                        // 构建经纬度 JSON
                         val data = HighFrequencyData(
                             lat = it.latitude,
                             lng = it.longitude,
@@ -57,10 +57,8 @@ class DashboardUpdater(
                         )
                         val jsonString = gson.toJson(data)
 
-                        // 3. 分别通过两个接口传给前端
-                        // 传经纬度
+                        // 调用你指定的两个 JS 接口
                         webView.evaluateJavascript("window.JSBridge.updateDashboard('$jsonString')", null)
-                        // 传地址字符串
                         webView.evaluateJavascript("window.JSBridge.updateAddress('$addressStr')", null)
                     }
                 }
