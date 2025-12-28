@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# 高德定位/搜索/地图 SDK 混淆配置
+-keep class com.amap.api.location.**{*;}
+-keep class com.amap.api.fence.**{*;}
+-keep class com.autonavi.aps.amapapi.model.**{*;}
+-keep class com.amap.api.services.**{*;}
+-keep class com.amap.api.maps.**{*;}
+-keep class com.autonavi.amap.mapcore.**{*;}
+-keep class com.amap.api.col.**{*;}

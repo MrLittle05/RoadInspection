@@ -45,42 +45,23 @@ class DashboardUpdater(
             // 任务1：监听位置 -> 1. 每次都更新经纬度 2. 只有到时间了才更新地址
             launch {
                 locationProvider.locationFlow.collect { location ->
-                    location?.let { loc ->
-                        val currentTime = System.currentTimeMillis()
+                    location?.let {
+                        // 1. 提取地址字符串 (从 Location 的 extras 中获取)
+                        val addressStr = it.extras?.getString("address") ?: "正在获取地址..."
 
-                        // =================================================
-                        // 逻辑核心：只有当 (当前时间 - 上次时间 > 间隔) 时，才去请求高德
-                        // =================================================
-                        if (currentTime - lastAddressRequestTime > ADDRESS_UPDATE_INTERVAL) {
-
-                            // 更新时间戳
-                            lastAddressRequestTime = currentTime
-
-                            // 发起网络请求 (挂起函数，不会卡顿)
-                            val newAddress = addressProvider.getAddressFromLocation(loc.latitude, loc.longitude)
-
-                            // 如果拿到了新地址，就更新缓存
-                            if (!newAddress.isNullOrEmpty()) {
-                                cachedAddress = newAddress
-                            }
-
-                            // 推送地址给 WebView (每4秒推一次)
-                            val addressScript = "window.JSBridge.updateAddress('$cachedAddress')"
-                            webView.evaluateJavascript(addressScript, null)
-                        }
-
-                        // =================================================
-                        // 经纬度数据：不管地址查没查，每一次都必须更新！(1秒1次)
-                        // =================================================
+                        // 2. 构建经纬度 JSON 对象
                         val data = HighFrequencyData(
-                            lat = loc.latitude,
-                            lng = loc.longitude,
-                            timeDiff = loc.time - System.currentTimeMillis()
-                            // 如果你想把 address 放进这里也可以： address = cachedAddress
+                            lat = it.latitude,
+                            lng = it.longitude,
+                            timeDiff = it.time - System.currentTimeMillis()
                         )
-                        val jsonData = gson.toJson(data)
-                        val script = "window.JSBridge.updateDashboard('$jsonData')"
-                        webView.evaluateJavascript(script, null)
+                        val jsonString = gson.toJson(data)
+
+                        // 3. 分别通过两个接口传给前端
+                        // 传经纬度
+                        webView.evaluateJavascript("window.JSBridge.updateDashboard('$jsonString')", null)
+                        // 传地址字符串
+                        webView.evaluateJavascript("window.JSBridge.updateAddress('$addressStr')", null)
                     }
                 }
             }

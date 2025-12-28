@@ -44,22 +44,20 @@ class LocationProvider(private val context: Context) {
 
     init {
         val onLocationResult: (Location) -> Unit = { location ->
-            _locationState.value = location
-            if (isRecordingDistance) {
-                updateDistance(location)
+            // 过滤掉小米可能返回的 0,0 伪坐标
+            if (location.latitude != 0.0 || location.longitude != 0.0) {
+                _locationState.value = location
+                if (isRecordingDistance) {
+                    updateDistance(location)
+                }
             }
         }
 
-        locationUpdateProvider = if (isGmsAvailable()) {
-            GmsLocationProvider(context, onLocationResult)
-        } else if (isHmsAvailable()) {
-            HmsLocationProvider(context, onLocationResult)
-        } else {
-            object : LocationUpdateProvider {
-                override fun startLocationUpdates() {}
-                override fun stopLocationUpdates() {}
-            }
-        }
+        // ================== 修改重点 ==================
+        // 不再根据 GMS/HMS 切换，全机型统一使用高德定位 SDK 作为核心引擎
+        // 这样小米手机就能避开连不上的 Google 服务
+        locationUpdateProvider = AmapLocationProvider(context, onLocationResult)
+        // =============================================
     }
 
     private fun isGmsAvailable(): Boolean {
@@ -135,7 +133,7 @@ class LocationProvider(private val context: Context) {
     }
 }
 
-private interface LocationUpdateProvider {
+internal interface LocationUpdateProvider {
     fun startLocationUpdates()
     fun stopLocationUpdates()
 }
