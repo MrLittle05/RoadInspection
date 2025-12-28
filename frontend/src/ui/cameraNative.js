@@ -92,7 +92,4 @@ const UI = {
   },
 };
 
-// 将模块内的函数暴露到全局 window 对象上，以便原生代码可以调用
-window.updateLatestPhoto = UI.updateLatestPhoto;
-
 export default UI;

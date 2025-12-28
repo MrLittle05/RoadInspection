@@ -8,6 +8,7 @@ const elements = {
   shutterBtn: null,
   aiBtn: null,
   timer: null,
+  distValRow: null,
 };
 
 const states = {
@@ -39,6 +40,7 @@ const UI = {
     elements.shutterBtn = document.getElementById("btn-shutter");
     elements.aiBtn = document.getElementById("btn-ai");
     elements.timer = document.getElementById("timer");
+    elements.distValRow = document.querySelector(".dist-val-row");
   },
 
   bind: (eventName, callback) => {
@@ -150,12 +152,16 @@ const UI = {
         "mode-tilt-right"
       );
 
-      if (states.currentRotationState === 0)
+      if (states.currentRotationState === 0) {
         layoutRoot.classList.add("mode-portrait");
-      if (states.currentRotationState === 90)
+        elements.distValRow.style.flexDirection = "row";
+      } else if (states.currentRotationState === 90) {
         layoutRoot.classList.add("mode-tilt-left");
-      if (states.currentRotationState === -90)
+        elements.distValRow.style.flexDirection = "row-reverse";
+      } else if (states.currentRotationState === -90) {
         layoutRoot.classList.add("mode-tilt-right");
+        elements.distValRow.style.flexDirection = "row";
+      }
 
       document.querySelectorAll(".rotatable").forEach((el) => {
         el.style.transform = `rotate(${states.currentRotationState}deg)`;
@@ -229,7 +235,7 @@ function calculateNextRotation(beta, gamma, currentRotationState) {
 
   // --- 2. 全局死区 ---
   // 极其平躺时直接忽略
-  if (absBeta < 10 && absGamma < 10) return;
+  if (absBeta < 10 && absGamma < 10) return currentRotationState;
 
   // --- 3. 核心逻辑 ---
   let nextRotation = currentRotationState;

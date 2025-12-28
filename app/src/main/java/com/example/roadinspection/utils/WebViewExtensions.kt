@@ -8,8 +8,7 @@ import android.webkit.WebView
  * 任何持有 WebView 的地方都可以直接调用 webView.notifyJsUpdatePhoto(uri)
  */
 fun WebView.notifyJsUpdatePhoto(uri: Uri) {
-    val script = "updateLatestPhoto('$uri')"
-    // post 确保在主线程执行，防止从后台线程调用时崩溃
+    val script = "window.JSBridge.updateLatestPhoto('$uri')"
     this.post {
         this.evaluateJavascript(script, null)
     }

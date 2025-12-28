@@ -195,19 +195,18 @@ fun WebViewScreen(
     imageCapture: ImageCapture
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope() // 用于 InspectionManager 的协程作用域
-
-    // 状态保持
-    var webView: WebView? by remember { mutableStateOf(null) }
-    var dashboardUpdater: DashboardUpdater? by remember { mutableStateOf(null) }
+    val scope = rememberCoroutineScope()
 
     // 1. 实例化 CameraHelper
     val cameraHelper = remember(context, imageCapture) {
         CameraHelper(context, imageCapture)
     }
 
+    // 保存 WebView 的引用，用于 onImageSaved 回调
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
     val onImageSaved: (Uri) -> Unit = { uri ->
-        webView?.notifyJsUpdatePhoto(uri)
+        webViewRef?.notifyJsUpdatePhoto(uri)
     }
 
     // 2. 实例化 InspectionManager
@@ -219,8 +218,7 @@ fun WebViewScreen(
     // 图片选择器的 Launcher
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
-            val script = "onImageSelected(\'$it\')"
-            webView?.post { webView?.evaluateJavascript(script, null) }
+
         }
     }
 
@@ -229,17 +227,9 @@ fun WebViewScreen(
         WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher)
     }
 
-    // 生命周期管理：WebView 销毁时停止更新
-    DisposableEffect(webView) {
-        webView?.let {
-            dashboardUpdater = DashboardUpdater(it, locationProvider, gpsSignalProvider, networkStatusProvider)
-        }
-        onDispose {
-            dashboardUpdater?.stop()
-            // 如果需要在页面销毁时停止巡检，也可以在这里调用：
-            // inspectionManager.stopInspection()
-        }
-    }
+    // 使用 State 来持有 updater 以便在 onDispose 中清理，
+    // 但初始化的工作移交给 factory
+    val dashboardUpdaterRef = remember { mutableStateOf<DashboardUpdater?>(null) }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -251,27 +241,42 @@ fun WebViewScreen(
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
 
+                // 【关键修改】在此处直接创建 DashboardUpdater，确保非空
+                val updater = DashboardUpdater(this, locationProvider, gpsSignalProvider, networkStatusProvider)
+                dashboardUpdaterRef.value = updater // 保存引用给 DisposableEffect 用
+
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
 
-                        // 开始更新仪表盘数据
-                        dashboardUpdater?.start()
+                        // 【关键修改】直接使用局部变量 updater，保证它一定存在
+                        updater.start()
 
-                        // 加载最后一张图片到 Web (如果有)
-                        getLatestPhotoUri(ctx)?.let {
-                            uri -> view?.notifyJsUpdatePhoto(uri)
+                        // 加载最后一张图片
+                        getLatestPhotoUri(ctx)?.let { uri ->
+                            Log.d("WebViewScreen", "Found latest photo: $uri")
+                            view?.notifyJsUpdatePhoto(uri)
                         }
                     }
                 }
+
+                addJavascriptInterface(webAppInterface, "AndroidNative")
                 loadUrl("file:///android_asset/index.html")
-            }.also { webview ->
-                webView = webview
-                // 注入 Native 接口
-                webview.addJavascriptInterface(webAppInterface, "AndroidNative")
+            }.also {
+                webViewRef = it
             }
         }
     )
+
+    // 生命周期管理：只负责清理
+    DisposableEffect(Unit) {
+        onDispose {
+            Log.d("WebViewScreen", "Stopping dashboard updater")
+            dashboardUpdaterRef.value?.stop()
+            // 如果需要停止巡检：
+            // inspectionManager.stopInspection()
+        }
+    }
 }
 
 private fun getLatestPhotoUri(context: Context): Uri? {

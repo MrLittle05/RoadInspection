@@ -28,12 +28,7 @@ window.JSBridge = {
     nativeUI.updateAddress(addr);
   },
 
-  onPhotoTaken: function (jsonStr) {
-    try {
-      const data = JSON.parse(jsonStr);
-      nativeUI.onPhotoTaken(data);
-    } catch (e) {
-      console.error(e);
-    }
+  updateLatestPhoto: function (uri) {
+    nativeUI.updateLatestPhoto(uri);
   },
 };
