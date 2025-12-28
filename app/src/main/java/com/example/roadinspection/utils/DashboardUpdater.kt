@@ -1,6 +1,5 @@
-package com.example.roadinspection.util
+package com.example.roadinspection.utils
 
-import android.location.Location
 import android.webkit.WebView
 import com.example.roadinspection.data.model.HighFrequencyData
 import com.example.roadinspection.domain.location.LocationProvider
@@ -9,7 +8,6 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import com.example.roadinspection.domain.location.AddressProvider
 import android.content.Context
