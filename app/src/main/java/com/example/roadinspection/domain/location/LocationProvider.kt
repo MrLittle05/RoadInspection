@@ -60,13 +60,13 @@ class LocationProvider(private val context: Context) {
         // =============================================
     }
 
-    private fun isGmsAvailable(): Boolean {
-        return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
-    }
-
-    private fun isHmsAvailable(): Boolean {
-        return HuaweiApiAvailability.getInstance().isHuaweiMobileServicesAvailable(context) == com.huawei.hms.api.ConnectionResult.SUCCESS
-    }
+//    private fun isGmsAvailable(): Boolean {
+//        return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
+//    }
+//
+//    private fun isHmsAvailable(): Boolean {
+//        return HuaweiApiAvailability.getInstance().isHuaweiMobileServicesAvailable(context) == com.huawei.hms.api.ConnectionResult.SUCCESS
+//    }
 
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
