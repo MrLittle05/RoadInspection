@@ -105,7 +105,7 @@ class DashboardUpdater(
                 .map { it.signalLevel }
                 .distinctUntilChanged()
                 .collect { level ->
-                    val script = "window.JSBridge.updateNetSignal($level)"
+                    val script = "window.JSBridge.updateNetLevel($level)"
                     webView.evaluateJavascript(script, null)
                 }
         }

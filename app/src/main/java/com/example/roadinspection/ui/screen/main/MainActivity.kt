@@ -60,11 +60,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // [Master 合并] 高德地图隐私合规接口 (必须在初始化之前调用)
+        // 高德地图隐私合规接口 (必须在初始化之前调用)
         ServiceSettings.updatePrivacyShow(this, true, true)
         ServiceSettings.updatePrivacyAgree(this, true)
 
-        // [HEAD 合并] 使用 ApplicationContext 避免内存泄漏
+        // 使用 ApplicationContext 避免内存泄漏
         this.locationProvider = LocationProvider(applicationContext)
         this.networkStatusProvider = NetworkStatusProvider(applicationContext)
         this.gpsSignalProvider = GpsSignalProvider(applicationContext)
@@ -107,7 +107,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ... (onStop, onStart, onDestroy 保持不变) ...
     override fun onStop() {
         super.onStop()
         if (locationProvider.isRecordingDistance) return
@@ -141,7 +140,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ... (CameraPreview 保持不变) ...
 @Composable
 fun CameraPreview(imageCapture: ImageCapture) {
     val context = LocalContext.current
@@ -268,7 +266,6 @@ fun WebViewScreen(
     }
 }
 
-// ... (getLatestPhotoUri 保持不变) ...
 private fun getLatestPhotoUri(context: Context): Uri? {
     val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
