@@ -13,5 +13,5 @@ data class HighFrequencyData(
     val timeDiff: Long = 0L,
     val lat: Double = 0.0,
     val lng: Double = 0.0,
-    val totalDistance: Double = 0.0
+    val totalDistance: Float = 0f
 )

@@ -20,7 +20,7 @@ class InspectionManager(
     private val onImageSaved: (Uri) -> Unit
 ) {
     private var autoCaptureJob: Job? = null
-    private var lastCaptureDistance = 0.0
+    private var lastCaptureDistance = 0f
     private val PHOTO_INTERVAL_METERS = 10.0
 
     // 开始业务
@@ -35,7 +35,7 @@ class InspectionManager(
 
         // 2. 重置数据
         locationProvider.resetDistanceCounter()
-        lastCaptureDistance = 0.0
+        lastCaptureDistance = 0f
 
         // 3. 开始监听流并触发拍照
         startAutoCaptureFlow()
@@ -51,7 +51,7 @@ class InspectionManager(
     private fun startAutoCaptureFlow() {
         autoCaptureJob?.cancel()
         autoCaptureJob = scope.launch {
-            locationProvider.distanceFlow.collect { totalDistance ->
+            locationProvider.totalDistance.collect { totalDistance ->
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
                     lastCaptureDistance = totalDistance
 

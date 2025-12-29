@@ -57,7 +57,7 @@ class DashboardUpdater(
         scope.launch {
             combine(
                 locationProvider.locationFlow,
-                locationProvider.distanceFlow
+                locationProvider.totalDistance
             ) { location, totalDist ->
                 if (location != null) {
                     // 1. 构建仪表盘数据
