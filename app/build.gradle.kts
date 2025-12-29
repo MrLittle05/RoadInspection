@@ -20,13 +20,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("commonConfig") {
+            // 指向你刚刚放入项目中的文件
+            storeFile = file("debug.keystore")
+            // 默认 debug 证书的密码通常都是 "android"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+        getByName("debug") {
+            // 2. 在 debug 模式下强制使用这个固定签名
+            signingConfig = signingConfigs.getByName("commonConfig")
+        }
+        getByName("release") {
+            // release 模式通常也建议使用固定的签名
+            signingConfig = signingConfigs.getByName("commonConfig")
         }
     }
     compileOptions {

@@ -47,6 +47,24 @@ class LocationProvider(private val context: Context) {
         // 初始化高德定位 (Master 的改动)
         // 注意：AmapLocationProvider 必须实现 LocationUpdateProvider 接口
         locationUpdateProvider = AmapLocationProvider(context, onLocationResult)
+
+    private val gnssStatusCallback = object : GnssStatus.Callback() {
+        override fun onSatelliteStatusChanged(status: GnssStatus) {
+            super.onSatelliteStatusChanged(status)
+            var satellitesWithGoodSignal = 0
+            for (i in 0 until status.satelliteCount) {
+                if (status.getCn0DbHz(i) > 30) {
+                    satellitesWithGoodSignal++
+                }
+            }
+            _gpsLevelState.value = when {
+                satellitesWithGoodSignal >= 10 -> 4
+                satellitesWithGoodSignal >= 7 -> 3
+                satellitesWithGoodSignal >= 4 -> 2
+                satellitesWithGoodSignal > 0 -> 1
+                else -> 0
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")

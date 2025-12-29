@@ -30,6 +30,7 @@ class AmapLocationProvider(
         // 设置回调监听
         locationClient?.setLocationListener { amapLocation ->
             if (amapLocation != null && amapLocation.errorCode == 0) {
+                // 1. 创建标准 Location 对象
                 val location = Location("amap").apply {
                     latitude = amapLocation.latitude
                     longitude = amapLocation.longitude
@@ -38,18 +39,20 @@ class AmapLocationProvider(
                     speed = amapLocation.speed
                     elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
                     // 将地址字符串存入 Bundle，传给 LocationProvider
+
+                    // 2. 将高德地址存入 extras，这样 DashboardUpdater 才能拿到
                     val bundle = android.os.Bundle()
                     bundle.putString("address", amapLocation.address)
                     extras = bundle
                 }
 
-                // 关键：调用这个回调，数据才会进入 LocationProvider 的 flow
+                // 3. 重要：调用回调，通知 LocationProvider 数据更新了
                 onLocationResult(location)
-            } else {
-                Log.e("AmapError",
-                    "定位失败, ErrCode: ${amapLocation.errorCode}, " +
-                            "ErrInfo: ${amapLocation.errorInfo}"
-                )
+
+                android.util.Log.d("AmapLog", "数据已传出: ${amapLocation.address}")
+            } else if (amapLocation != null) {
+                // 如果失败，打印错误码（这对排查小米问题至关重要）
+                android.util.Log.e("AmapLog", "定位失败码: ${amapLocation.errorCode}, 信息: ${amapLocation.errorInfo}")
             }
         }
     }
