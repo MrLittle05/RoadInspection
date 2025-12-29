@@ -71,6 +71,8 @@ class DashboardUpdater(
                     // 2. 提取地址 (来自 AmapLocationProvider 放入的 Bundle)
                     val address = location.extras?.getString("address") ?: "正在定位..."
 
+                    Log.d("AddressCheck", "当前获取到的地址: $address")
+
                     Pair(gson.toJson(data), address)
                 } else {
                     null

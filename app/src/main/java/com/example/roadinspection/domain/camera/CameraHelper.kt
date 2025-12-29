@@ -28,7 +28,7 @@ class CameraHelper(
         }
 
         // 1. 准备文件名和元数据
-        val name = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+        val name = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.CHINA)
             .format(System.currentTimeMillis())
 
         val contentValues = ContentValues().apply {

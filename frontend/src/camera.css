@@ -8,7 +8,7 @@ body {
   padding: 0;
   width: 100vw;
   height: 100vh;
-  background-color: transparent;
+  background-color: black;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
   color: white;
@@ -86,9 +86,10 @@ body {
 
 #address {
   max-width: 140px;
-  white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .info-hidden {
@@ -342,14 +343,14 @@ body {
 
 .mode-tilt-left .text-info {
   right: 2px;
-  top: 220px;
+  top: 230px;
   transform-origin: top right;
   transform: rotate(90deg);
   text-align: left;
 }
 
 .mode-tilt-right .text-info {
-  right: 40px;
+  right: 52px;
   top: 60px;
   transform-origin: top right;
   transform: rotate(-90deg);
