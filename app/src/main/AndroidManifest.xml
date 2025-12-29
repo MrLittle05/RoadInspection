@@ -17,6 +17,10 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
         tools:ignore="ScopedStorage" />
 
+    <!-- 4.前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -39,7 +43,7 @@
             android:value="6182574dd84f1c7f4ac735d707599248" />
 
         <service android:name="com.amap.api.location.APSService" />
-        
+
         <activity
             android:name=".ui.screen.main.MainActivity"
             android:exported="true"
