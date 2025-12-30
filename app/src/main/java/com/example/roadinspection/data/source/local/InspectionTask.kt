@@ -51,5 +51,14 @@ data class InspectionTask(
      * - true: 已结束
      */
     @ColumnInfo(name = "is_finished")
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+
+    /**
+     * 任务本身的同步状态
+     * 0 = 本地新建 (Local Only) -> 需要调 /api/task/create
+     * 1 = 已同步 (Synced)      -> 服务器已有此任务
+     * 2 = 已同步且已结束 (Finalized)   -> 服务器已更新 end_time
+    **/
+    @ColumnInfo(name = "sync_state")
+    val syncState: Int = 0
 )

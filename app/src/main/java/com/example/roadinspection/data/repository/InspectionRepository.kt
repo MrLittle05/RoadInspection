@@ -35,7 +35,7 @@ class InspectionRepository(context: Context) {
     private val dao = database.inspectionDao()
 
     // -------------------------------------------------------------------------
-    // Region: 供 ViewModel 调用的业务方法
+    // Region: 供调用的业务方法
     // -------------------------------------------------------------------------
 
     /**

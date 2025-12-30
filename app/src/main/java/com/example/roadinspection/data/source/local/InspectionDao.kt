@@ -53,6 +53,31 @@ interface InspectionDao {
     @Query("SELECT * FROM inspection_tasks WHERE task_id = :taskId")
     suspend fun getTaskById(taskId: String): InspectionTask?
 
+    /**
+     * 查找尚未同步到服务器的任务
+     *
+     * @return 待同步到服务器的任物列表
+     */
+    @Query("SELECT * FROM inspection_tasks WHERE sync_state = 0")
+    suspend fun getUnsyncedTasks(): List<InspectionTask>
+
+    /**
+     * 更新任务同步状态 (0 -> 1, 或 1 -> 2)
+     *
+     * @param taskId 任务 UUID
+     * @param newState 任务更新后的状态
+     */
+    @Query("UPDATE inspection_tasks SET sync_state = :newState WHERE task_id = :taskId")
+    suspend fun updateTaskSyncState(taskId: String, newState: Int)
+
+    /**
+     * 查出本地已停止，但服务器还不知道的任务
+     *
+     * @return 待更新停止时间及同步状态的任务列表
+     */
+    @Query("SELECT * FROM inspection_tasks WHERE is_finished = 1 AND sync_state = 1")
+    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask>
+
     // -------------------------------------------------------------------------
     // Region: 巡检记录管理 (InspectionRecord)
     // -------------------------------------------------------------------------
