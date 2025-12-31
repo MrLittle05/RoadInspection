@@ -116,12 +116,14 @@ router.get("/api/oss/sts", async (ctx) => {
  * @param {number} startTime - 开始时间戳
  */
 router.post("/api/task/create", async (ctx) => {
-  const { taskId, title, inspectorId, startTime } = ctx.request.body;
+  const { taskId, title, inspectorId, startTime, endTime } = ctx.request.body;
 
   // 关键业务日志：记录核心 ID，方便日后排查 "某人说他建了任务但库里没有" 的扯皮问题
   console.log(
     `📋 [Task Create] 收到请求: User=${inspectorId}, Task=${taskId}, Title=${title}`
   );
+
+  const isFinished = !!endTime;
 
   try {
     // 使用 MongoDB Upsert (更新或插入) 实现幂等
@@ -134,9 +136,11 @@ router.post("/api/task/create", async (ctx) => {
           title,
           inspectorId,
           startTime,
-          isFinished: false,
+          endTime: endTime || null,
+          isFinished: isFinished,
         },
       },
+      // 如果任务不存在则插入，存在则忽略($setOnInsert不生效)
       { upsert: true }
     );
 
@@ -144,7 +148,7 @@ router.post("/api/task/create", async (ctx) => {
     ctx.body = { code: 200, message: "任务创建成功" };
   } catch (e) {
     console.error(`❌ [Task Create] 失败 (ID: ${taskId}):`, e);
-    ctx.body = { code: 500, message: "保存失败" };
+    ctx.body = { code: 500, message: "任务创建失败" };
   }
 });
 
@@ -195,7 +199,7 @@ router.post("/api/record/submit", async (ctx) => {
     ctx.body = { code: 200, message: "记录保存成功" };
   } catch (e) {
     console.error(`❌ [Record] 保存失败:`, e);
-    ctx.body = { code: 500, message: "保存失败" };
+    ctx.body = { code: 500, message: "记录保存失败" };
   }
 });
 
@@ -229,7 +233,7 @@ router.post("/api/task/finish", async (ctx) => {
     }
   } catch (e) {
     console.error(`❌ [Task Finish] 失败:`, e);
-    ctx.body = { code: 500, message: "操作失败" };
+    ctx.body = { code: 500, message: "同步任务结束失败" };
   }
 });
 
@@ -241,7 +245,7 @@ router.post("/api/task/finish", async (ctx) => {
 app.use(bodyParser()); // 解析 JSON Body
 app.use(router.routes()).use(router.allowedMethods());
 
-const PORT = 3000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`
 🚀 Road Inspection Server Running...

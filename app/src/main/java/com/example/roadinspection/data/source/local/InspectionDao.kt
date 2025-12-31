@@ -19,12 +19,12 @@ interface InspectionDao {
     // -------------------------------------------------------------------------
 
     /**
-     * 开始新巡检：插入任务主记录。
+     * 开始新巡检：插入新的巡检任务。
      *
      * @param task 新创建的巡检任务对象
-     * @see OnConflictStrategy.REPLACE 防止极端情况下 UUID 碰撞
+     * @see OnConflictStrategy.IGNORE 防止UUID重复的极端情况下误删任务下属照片信息
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTask(task: InspectionTask)
 
     /**
@@ -37,7 +37,7 @@ interface InspectionDao {
     suspend fun finishTask(taskId: String, endTime: Long)
 
     /**
-     * 获取历史巡检任务列表。
+     * 获取当前用户的所有巡检任务列表。
      *
      * @return [Flow] 数据流。当数据库发生变更时，UI 会自动接收到最新的列表。
      */
@@ -54,7 +54,7 @@ interface InspectionDao {
     suspend fun getTaskById(taskId: String): InspectionTask?
 
     /**
-     * 查找尚未同步到服务器的任务
+     * 查找当前用户的所有尚未同步到服务器的任务
      *
      * @return 待同步到服务器的任物列表
      */
@@ -92,6 +92,13 @@ interface InspectionDao {
     suspend fun insertRecord(record: InspectionRecord): Long
 
     /**
+     * 照片上传阿里云后：更新记录信息。
+     * 主要用于 WorkManager 在后台上传成功后，回填 `serverUrl` 并更新 `syncStatus`。
+     */
+    @Update
+    suspend fun updateRecord(record: InspectionRecord)
+
+    /**
      * 获取指定任务下的所有照片记录。
      * 用于在任务详情页按时间顺序展示轨迹或照片流。
      *
@@ -101,11 +108,11 @@ interface InspectionDao {
     fun getRecordsByTask(taskId: String): Flow<List<InspectionRecord>>
 
     /**
-     * 更新记录信息。
-     * 主要用于 WorkManager 在后台上传成功后，回填 `serverUrl` 并更新 `syncStatus`。
+     * 根据任务 ID 和 同步状态 筛选记录。
+     * 用于 UI 的筛选 Tab 功能 (例如只看“未完成”的)。
      */
-    @Update
-    suspend fun updateRecord(record: InspectionRecord)
+    @Query("SELECT * FROM inspection_records WHERE task_id = :taskId AND sync_status = :status ORDER BY capture_time ASC")
+    fun getRecordsByTaskAndStatus(taskId: String, status: Int): Flow<List<InspectionRecord>>
 
     // -------------------------------------------------------------------------
     // Region: 后台同步专用 (WorkManager)
@@ -115,13 +122,13 @@ interface InspectionDao {
      * 批量获取未完成同步的巡检记录。
      *
      * **查询逻辑：** 筛选 `sync_status != 2 (SYNCED)` 的记录。
-     * **性能优化：** 使用 `LIMIT 10` 限制单次查询数量，防止 WorkManager 一次性加载过多图片对象导致 OOM (内存溢出)。
      * WorkManager 应采用循环处理机制：处理完一批 -> 再次查询 -> 直至列表为空。
      *
+     * @param limit 单次拉取的最大数量 (由调用者决定)
      * @return 待处理的记录列表 (按拍摄时间升序排列)
      */
-    @Query("SELECT * FROM inspection_records WHERE sync_status != 2 ORDER BY capture_time ASC LIMIT 10")
-    suspend fun getBatchUnfinishedRecords(): List<InspectionRecord>
+    @Query("SELECT * FROM inspection_records WHERE sync_status != 2 ORDER BY capture_time ASC LIMIT :limit")
+    suspend fun getBatchUnfinishedRecords(limit: Int): List<InspectionRecord>
 
     /**
      * 获取当前剩余待上传的记录总数。

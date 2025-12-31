@@ -2,6 +2,7 @@ package com.example.roadinspection.data.repository
 
 import android.content.Context
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.data.source.local.InspectionTask
 import kotlinx.coroutines.flow.Flow
@@ -18,21 +19,9 @@ import kotlinx.coroutines.flow.Flow
  * 2. 封装 DAO 操作，为上层业务提供简洁的 suspend 函数或 Flow 数据流。
  * 3. (未来扩展) 协调本地数据库与网络请求之间的逻辑（如触发 WorkManager）。
  *
- * @param context 应用上下文，用于初始化数据库。
+ * @param dao 巡检模块的数据访问对象，所有实际的 CRUD 操作均委托给此对象执行。
  */
-class InspectionRepository(context: Context) {
-
-    /**
-     * 本地数据库实例 (Singleton)。
-     * 通过 [AppDatabase.getDatabase] 获取，确保线程安全且全局唯一。
-     */
-    private val database = AppDatabase.getDatabase(context)
-
-    /**
-     * 巡检模块的数据访问对象 (DAO)。
-     * 所有实际的 CRUD 操作均委托给此对象执行。
-     */
-    private val dao = database.inspectionDao()
+class InspectionRepository(private val dao: InspectionDao) {
 
     // -------------------------------------------------------------------------
     // Region: 供调用的业务方法
@@ -45,10 +34,56 @@ class InspectionRepository(context: Context) {
      * @return 新生成的任务 ID (UUID 字符串)，供后续拍照时关联使用。
      */
     suspend fun createTask(title: String): String {
-        val task = InspectionTask(title = title)
+        //TODO: 从全局 Session获取当前登录人的 ID
+        val currentUserId = "user_default"
+
+        val task = InspectionTask(title = title, inspectorId = currentUserId)
         dao.insertTask(task)
         return task.taskId
     }
+
+    /**
+     * 结束指定的巡检任务。
+     * 更新任务的结束时间和完成状态。
+     *
+     * @param taskId 任务 UUID
+     */
+    suspend fun finishTask(taskId: String) {
+        dao.finishTask(taskId = taskId, endTime = System.currentTimeMillis())
+    }
+
+    /**
+     * 获取所有尚未同步到服务器的任务 (syncState = 0)。
+     * WorkManager 将遍历此列表，调用 /api/task/create 接口。
+     */
+    suspend fun getUnsyncedTasks(): List<InspectionTask> = dao.getUnsyncedTasks()
+
+    /**
+     * 获取本地已完成，但服务器状态仍为“进行中”的任务 (isFinished = 1 AND syncState = 1)。
+     * WorkManager 将遍历此列表，调用 /api/task/finish 接口。
+     */
+    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask> = dao.getFinishedButNotSyncedTasks()
+
+    /**
+     * 更新任务的同步状态。
+     *
+     * - 当 /api/task/create 成功后，将状态从 0 更新为 1。
+     * - 如果该任务在上传时已经是完成状态（且使用了携带 endTime 的优化接口），直接更新为 2。
+     * - 当 /api/task/finish 成功后，将状态从 1 更新为 2。
+     *
+     * @param taskId 任务 UUID
+     * @param newState 新的同步状态 (1=已同步, 2=已终结)
+     */
+    suspend fun updateTaskSyncState(taskId: String, newState: Int) {
+        dao.updateTaskSyncState(taskId, newState)
+    }
+
+    /**
+     * 获取所有历史巡检任务列表。
+     *
+     * @return [Flow] 数据流。当数据库新增任务或状态改变时，UI 会自动刷新。
+     */
+    fun getAllTasks(): Flow<List<InspectionTask>> = dao.getAllTasks()
 
     /**
      * 保存一条巡检记录（照片及位置信息）。
@@ -63,21 +98,14 @@ class InspectionRepository(context: Context) {
     }
 
     /**
-     * 结束指定的巡检任务。
-     * 更新任务的结束时间和完成状态。
+     * 更新巡检记录。
+     * 用于 WorkManager 上传成功后，回填 serverUrl 和 syncStatus。
      *
-     * @param taskId 任务 UUID
+     * @param record 包含最新状态和 URL 的记录对象（必须包含正确的 id）
      */
-    suspend fun finishTask(taskId: String) {
-        dao.finishTask(taskId, System.currentTimeMillis())
+    suspend fun updateRecord(record: InspectionRecord) {
+        dao.updateRecord(record)
     }
-
-    /**
-     * 获取所有历史巡检任务列表。
-     *
-     * @return [Flow] 数据流。当数据库新增任务或状态改变时，UI 会自动刷新。
-     */
-    fun getAllTasks(): Flow<List<InspectionTask>> = dao.getAllTasks()
 
     /**
      * 获取指定任务下的所有照片记录。
@@ -86,6 +114,25 @@ class InspectionRepository(context: Context) {
      * @param taskId 任务 UUID
      */
     fun getRecordsByTask(taskId: String): Flow<List<InspectionRecord>> = dao.getRecordsByTask(taskId)
+
+    /**
+     * 获取指定任务下，特定状态的记录列表。
+     * @param status 0=Pending, 1=ImgUploaded, 2=Synced
+     */
+    fun getRecordsByTaskAndStatus(taskId: String, status: Int): Flow<List<InspectionRecord>> {
+        return dao.getRecordsByTaskAndStatus(taskId, status)
+    }
+
+    /**
+     * 获取一批待上传的记录。
+     *
+     * @param limit 单次批处理数量，默认为 10。
+     * 如果网络环境好（WiFi），可以传大一点（如 20）；
+     * 如果内存紧张或网络差，可以传小一点（如 5）。
+     */
+    suspend fun getBatchUnfinishedRecords(limit: Int = 10): List<InspectionRecord> {
+        return dao.getBatchUnfinishedRecords(limit)
+    }
 
     /**
      * 获取当前待上传（未同步完成）的记录总数。
