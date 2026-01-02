@@ -59,6 +59,8 @@ class LocationProvider(private val context: Context) {
         val locationAgeNs = SystemClock.elapsedRealtimeNanos() - rawLocation.elapsedRealtimeNanos
         if (locationAgeNs > 10_000_000_000L) return
 
+        if (rawLocation.accuracy > 20.0f) return
+
         // 2. 卡尔曼滤波处理 (平滑经纬度，减少 GPS 抖动)
         kalmanFilter.process(
             latMeasurement = rawLocation.latitude,
