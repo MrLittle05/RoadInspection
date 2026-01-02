@@ -32,14 +32,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.amap.api.services.core.ServiceSettings
+import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
-import com.example.roadinspection.ui.bridge.AndroidNativeApi
 import com.example.roadinspection.ui.theme.GreetingCardTheme
-import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
 
@@ -218,8 +217,8 @@ fun WebViewScreen(
     }
 
     // WebAppInterface
-    val androidNativeApi = remember(inspectionManager, context, selectImageLauncher) {
-        AndroidNativeApiImpl(inspectionManager, context, selectImageLauncher)
+    val webAppInterface = remember(inspectionManager, context, selectImageLauncher) {
+        WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher)
     }
 
     // DashboardUpdater Ref
@@ -249,7 +248,7 @@ fun WebViewScreen(
                     }
                 }
 
-                addJavascriptInterface(androidNativeApi, "AndroidNative")
+                addJavascriptInterface(webAppInterface, "AndroidNative")
                 loadUrl("file:///android_asset/index.html")
             }.also {
                 webViewRef = it

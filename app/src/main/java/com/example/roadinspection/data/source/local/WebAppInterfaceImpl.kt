@@ -1,6 +1,8 @@
-package com.example.roadinspection.ui.bridge
+package com.example.roadinspection.data.source.local
 
 import android.content.Context
+import android.net.Uri
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -10,11 +12,11 @@ import com.example.roadinspection.domain.inspection.InspectionManager
  * WebAppInterface 接口的具体实现类 (Class)。
  * 它负责处理所有来自 JavaScript 的具体调用逻辑。
  */
-class AndroidNativeApiImpl(
+class WebAppInterfaceImpl(
     private val inspectionManager: InspectionManager,
     private val context: Context,
     private val selectImageLauncher: ActivityResultLauncher<String>
-) : AndroidNativeApi {
+) : WebAppInterface {
 
     @JavascriptInterface
     override fun startInspection() {
@@ -54,5 +56,5 @@ class AndroidNativeApiImpl(
     override fun showToast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
-}
 
+}

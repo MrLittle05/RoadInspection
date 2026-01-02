@@ -1,4 +1,4 @@
-package com.example.roadinspection.ui.bridge
+package com.example.roadinspection.data.source.local
 
 import android.webkit.JavascriptInterface
 
@@ -7,7 +7,7 @@ import android.webkit.JavascriptInterface
  * JavaScript 端可以通过 window.AndroidNative 调用这些方法。
  * 这个接口只定义了“能做什么”，而不关心“如何做”。
  */
-interface AndroidNativeApi {
+interface WebAppInterface {
 
     @JavascriptInterface
     fun startInspection()
