@@ -1,9 +1,9 @@
-package com.example.roadinspection.domain.location // 确认包名
+package com.example.roadinspection.domain.location
 
 import android.content.Context
 import com.amap.api.services.core.LatLonPoint
 import com.amap.api.services.geocoder.GeocodeSearch
-import com.amap.api.services.geocoder.RegeocodeAddress // 1. 确保导入这个
+import com.amap.api.services.geocoder.RegeocodeAddress
 import com.amap.api.services.geocoder.RegeocodeQuery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
