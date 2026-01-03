@@ -1,62 +1,54 @@
 package com.example.roadinspection.data.repository
 
+import android.graphics.Bitmap
+import android.location.Location
 import com.example.roadinspection.data.model.Inspection
 import com.example.roadinspection.data.model.InspectionPoint
 import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
-// --- 仓库接口 ---
-
 interface RoadInspectionRepository {
 
-    /**
-     * 获取所有巡检记录的流。
-     * 当数据库发生变化时，Flow 会发出新的列表。
-     */
+    // ============ UI 数据流 ============
+
+    // 获取巡检列表流
     fun getInspections(): Flow<List<Inspection>>
 
-    /**
-     * 获取指定巡检记录的所有采集点。
-     * @param inspectionId 巡检记录的 ID
-     */
+    // 获取某次巡检的所有点流
     fun getInspectionPoints(inspectionId: Long): Flow<List<InspectionPoint>>
 
-    /**
-     * 根据ID获取单个巡检记录。
-     * @param inspectionId 巡检记录的 ID
-     * @return 如果找到则返回 Inspection 对象，否则返回 null
-     */
-    suspend fun getInspectionById(inspectionId: Long): Inspection?
+    // ============ 巡检业务操作 (InspectionManager 调用) ============
 
-    /**
-     * 开始一次新的巡检，并在数据库中创建一条新记录。
-     * @param startTime 开始时间
-     * @return 返回新创建的巡检记录的 ID
-     */
+    // 1. 开始巡检 (返回 inspectionId 用于后续关联)
     suspend fun startInspection(startTime: Date): Long
 
-    /**
-     * 结束指定的巡检。
-     * @param inspectionId 要结束的巡检记录的 ID
-     * @param endTime 结束时间
-     */
+    // 2. 结束巡检
     suspend fun endInspection(inspectionId: Long, endTime: Date)
 
     /**
-     * 添加一个巡检采集点（例如，保存一张照片和相关数据）。
-     * @param point 要添加的采集点数据
+     * 3. 核心保存方法
+     * Repository 层负责：
+     * a. 将 Bitmap 压缩为 WebP 并保存到私有目录
+     * b. 生成 InspectionPoint 对象
+     * c. 插入数据库
+     * 这样 InspectionManager 不需要关心文件 IO
      */
-    suspend fun addInspectionPoint(point: InspectionPoint)
+    suspend fun saveRecord(
+        inspectionId: Long,
+        bitmap: Bitmap,
+        location: Location?,
+        address: String
+    )
 
-    /**
-     * 删除一个指定的采集点
-     * @param point 要删除的采集点
-     */
-    suspend fun deleteInspectionPoint(point: InspectionPoint)
+    // ============ 后台同步操作 (WorkManager 调用)  ============
 
-    /**
-     * 删除一个完整的巡检记录及其所有相关的采集点
-     * @param inspection 要删除的巡检记录
-     */
+    // 获取所有需要上传的点 (status != SYNCED)
+    suspend fun getPendingPoints(): List<InspectionPoint>
+
+    // 更新上传状态 (例如：上传成功后，更新 status 和 serverUrl)
+    suspend fun updatePointStatus(pointId: Long, status: Int, serverUrl: String? = null)
+
+    // ============ 清理操作 ============
+
     suspend fun deleteInspection(inspection: Inspection)
 }
