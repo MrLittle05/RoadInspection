@@ -7,8 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
-// 假设你的 KalmanFilter 在这个包下，如果不是请修改 import
-import com.example.roadinspection.util.KalmanFilter
+import com.example.roadinspection.utils.KalmanFilter
 
 /**
  * 接口定义 (保持在类外部，确保可见性)
@@ -22,21 +21,22 @@ class LocationProvider(private val context: Context) {
 
     // 1. UI 状态流
     private val _locationState = MutableStateFlow<Location?>(null)
-    val locationFlow: StateFlow<Location?> = _locationState.asStateFlow()
+    private val locationFlow = _locationState.asStateFlow()
 
-    private val _totalDistance = MutableStateFlow(0f)
-    val totalDistance = _totalDistance.asStateFlow()
+    private val _distanceState = MutableStateFlow(0f)
+
+    private val distanceFlow = _distanceState.asStateFlow()
 
     // 2. 核心组件
     private var locationUpdateProvider: LocationUpdateProvider? = null
 
-    // 初始化卡尔曼滤波器 (假设你有这个类)
+    // 初始化卡尔曼滤波器
     private val kalmanFilter = KalmanFilter()
 
     // 3. 算法状态变量
-    var isRecordingDistance = false
+    private var isUpdatingDistance = false
     private var lastValidLocation: Location? = null
-    private var warmUpCounter = 0 // 预热计数器，过滤刚开始定位时的不稳定点
+    private var warmUpCounter = 5 // 预热计数器，过滤刚开始定位时的不稳定点
 
     init {
         // 定义回调：AmapLocationProvider 拿到原始数据后，交给 processLocation 处理
@@ -47,6 +47,34 @@ class LocationProvider(private val context: Context) {
         // 初始化高德定位 (不再区分 GMS/HMS)
         locationUpdateProvider = AmapLocationProvider(context, onLocationResult)
     }
+
+    // ================== 公共控制方法 ==================
+
+    fun getLocationFlow(): StateFlow<Location?> = locationFlow
+
+    fun getDistanceFlow(): StateFlow<Float> = distanceFlow
+
+    fun startLocationUpdates() {
+        locationUpdateProvider?.startLocationUpdates()
+    }
+
+    fun stopLocationUpdates() {
+        locationUpdateProvider?.stopLocationUpdates()
+    }
+
+    fun startDistanceUpdates() {
+        _distanceState.value = 0f
+        lastValidLocation = null
+        kalmanFilter.reset()
+        warmUpCounter = 5
+        isUpdatingDistance = true
+    }
+
+    fun stopDistanceUpdates() {
+        isUpdatingDistance = false
+    }
+
+    fun isUpdatingDistance(): Boolean = isUpdatingDistance
 
     /**
      * 核心算法处理 (HEAD 的逻辑 - 已融合)
@@ -90,7 +118,7 @@ class LocationProvider(private val context: Context) {
         _locationState.value = filteredLocation
 
         // 5. 如果正在记录，进行距离计算
-        if (isRecordingDistance) {
+        if (isUpdatingDistance) {
             updateDistance(filteredLocation)
         }
     }
@@ -142,43 +170,9 @@ class LocationProvider(private val context: Context) {
 
             // 7. 累加距离 (转换为千米)
             // 注意：你的原逻辑是 += distanceDelta (米)，这里我除以 1000f 转为千米，适配 UI
-            _totalDistance.value += distanceDelta / 1000f
+            _distanceState.value += distanceDelta / 1000f
 
             lastValidLocation = filteredCurrent
         }
-    }
-
-    // ================== 公共控制方法 ==================
-
-    fun startLocationUpdates() {
-        locationUpdateProvider?.startLocationUpdates()
-    }
-
-    fun stopLocationUpdates() {
-        locationUpdateProvider?.stopLocationUpdates()
-    }
-
-    fun startRecordingDistance() {
-        isRecordingDistance = true
-        _totalDistance.value = 0f
-        lastValidLocation = null
-        warmUpCounter = 5 // 开启巡检时，前5个点丢弃，防止漂移
-        // 如果 KalmanFilter 需要重置，可以在这里调用 kalmanFilter.reset()
-    }
-
-    fun stopRecordingDistance() {
-        isRecordingDistance = false
-    }
-
-    fun resetDistanceCounter() {
-        _totalDistance.value = 0f
-        lastValidLocation = null
-        kalmanFilter.reset()
-        warmUpCounter = 0
-        isRecordingDistance = true
-    }
-
-    fun stopDistanceCounter() {
-        isRecordingDistance = false
     }
 }

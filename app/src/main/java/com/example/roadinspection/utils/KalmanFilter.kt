@@ -1,4 +1,4 @@
-package com.example.roadinspection.util
+package com.example.roadinspection.utils
 
 import kotlin.math.sqrt
 

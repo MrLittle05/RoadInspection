@@ -49,10 +49,10 @@ class AmapLocationProvider(
                 // 3. 重要：调用回调，通知 LocationProvider 数据更新了
                 onLocationResult(location)
 
-                android.util.Log.d("AmapLog", "数据已传出: ${amapLocation.address}")
+                Log.d("AmapLog", "数据已传出: ${amapLocation.address}")
             } else if (amapLocation != null) {
                 // 如果失败，打印错误码（这对排查小米问题至关重要）
-                android.util.Log.e("AmapLog", "定位失败码: ${amapLocation.errorCode}, 信息: ${amapLocation.errorInfo}")
+                Log.e("AmapLog", "定位失败码: ${amapLocation.errorCode}, 信息: ${amapLocation.errorInfo}")
             }
         }
     }
