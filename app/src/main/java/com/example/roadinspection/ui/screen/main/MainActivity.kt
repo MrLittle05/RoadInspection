@@ -32,13 +32,15 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.amap.api.services.core.ServiceSettings
-import com.example.roadinspection.data.source.local.WebAppInterfaceImpl
+import com.example.roadinspection.data.repository.InspectionRepository
+import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
+import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
 
@@ -109,7 +111,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (locationProvider.isRecordingDistance) return
+        if (locationProvider.isUpdatingDistance()) return
         stopTrackingServices()
     }
 
@@ -201,6 +203,11 @@ fun WebViewScreen(
         CameraHelper(context, imageCapture)
     }
 
+    // InspectionRepository
+    val database = remember { AppDatabase.getDatabase(context) }
+    val dao = remember { database.inspectionDao() }
+    val repository = remember { InspectionRepository(dao) }
+
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val onImageSaved: (Uri) -> Unit = { uri ->
         webViewRef?.notifyJsUpdatePhoto(uri)
@@ -208,7 +215,7 @@ fun WebViewScreen(
 
     // InspectionManager
     val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
-        InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved)
+        InspectionManager(context, repository, locationProvider, cameraHelper, scope, onImageSaved)
     }
 
     // Image Launcher
@@ -217,8 +224,8 @@ fun WebViewScreen(
     }
 
     // WebAppInterface
-    val webAppInterface = remember(inspectionManager, context, selectImageLauncher) {
-        WebAppInterfaceImpl(inspectionManager, context, selectImageLauncher)
+    val androidNativeApi = remember(inspectionManager, context, selectImageLauncher) {
+        AndroidNativeApiImpl(inspectionManager, context, selectImageLauncher)
     }
 
     // DashboardUpdater Ref
@@ -248,7 +255,7 @@ fun WebViewScreen(
                     }
                 }
 
-                addJavascriptInterface(webAppInterface, "AndroidNative")
+                addJavascriptInterface(androidNativeApi, "AndroidNative")
                 loadUrl("file:///android_asset/index.html")
             }.also {
                 webViewRef = it
