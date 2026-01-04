@@ -9,6 +9,7 @@ import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.service.KeepAliveService
+import com.example.roadinspection.worker.WorkManagerConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -193,6 +194,7 @@ class InspectionManager(
         scope.launch {
             repository.saveRecord(record)
             Log.d(TAG, "Record saved: ${record.localPath}")
+            WorkManagerConfig.scheduleUpload(context)
         }
     }
 

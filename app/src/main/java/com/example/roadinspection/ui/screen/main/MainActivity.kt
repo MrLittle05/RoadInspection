@@ -43,6 +43,7 @@ import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
+import com.example.roadinspection.worker.WorkManagerConfig
 
 class MainActivity : ComponentActivity() {
 
@@ -91,6 +92,9 @@ class MainActivity : ComponentActivity() {
         if (!hasPermissions()) {
             requestPermissionLauncher.launch(permissions.toTypedArray())
         }
+
+        // 启动时，处理上次 App 退出/崩溃/断网遗留的未上传数据。
+        WorkManagerConfig.scheduleUpload(applicationContext)
 
         setContent {
             GreetingCardTheme {
