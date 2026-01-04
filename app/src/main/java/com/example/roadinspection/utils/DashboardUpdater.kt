@@ -1,5 +1,6 @@
 package com.example.roadinspection.utils
 
+import android.util.Log
 import android.webkit.WebView
 import com.example.roadinspection.data.model.HighFrequencyData
 import com.example.roadinspection.domain.location.GpsSignalProvider
@@ -10,13 +11,24 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
-import android.util.Log
 
 /**
- * 负责向 WebView 分发数据的更新器。
- * 架构：保留 HEAD 的响应式流设计
- * 功能：集成 Master 的地址更新 (通过 Location Extras)
+ * 负责将业务层的数据（位置、GPS、网络）分发给 WebView 前端的更新器。
+ *
+ * 该类作为 Presenter 层与 View (WebView) 的桥梁，采用响应式流 (Kotlin Flow) 设计。
+ * 它并行监听各个 Provider 的数据流，经过处理和节流后，通过 JSBridge 调用前端方法。
+ *
+ * 主要功能：
+ * 1. 整合位置与距离数据，高频刷新仪表盘。
+ * 2. 监听地址变化，低频推送到前端（自动去重）。
+ * 3. 监听环境状态（GPS 信号、网络信号）。
+ *
+ * @property webView 用于执行 JS 代码的 WebView 实例。
+ * @property locationProvider 提供经纬度、时间、extras（地址）等位置信息。
+ * @property gpsSignalProvider 提供 GPS 卫星信号强度信息。
+ * @property networkStatusProvider 提供移动网络信号强度信息。
  */
 class DashboardUpdater(
     private val webView: WebView,
@@ -25,76 +37,127 @@ class DashboardUpdater(
     private val networkStatusProvider: NetworkStatusProvider
 ) {
 
+    /**
+     * 运行数据监听任务的协程作用域。
+     * 绑定主线程 (Main)，并使用 [SupervisorJob] 确保子任务异常不会导致整个作用域崩溃。
+     */
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val gson = Gson()
-
-    // 用于去重，防止相同地址重复发给 JS 浪费性能
-    private var lastSentAddress: String? = null
 
     /**
-     * 启动并行的数据监听任务
+     * 用于序列化数据对象为 JSON 字符串。
+     */
+    private val gson = Gson()
+
+    /**
+     * 启动所有并行的数据监听任务。
+     *
+     * 该方法会先取消之前可能存在的任务，然后重新启动以下流的监听：
+     * * [startHighFrequencyDataUpdates] - 仪表盘数据
+     * * [startAddressUpdates] - 地址信息
+     * * [startGpsStatusUpdates] - GPS 信号
+     * * [startNetworkStatusUpdates] - 网络信号
+     *
+     * 最后调用 [LocationProvider.startLocationUpdates]
+     * [GpsSignalProvider.startGpsSignalUpdates] 激活定位硬件。
      */
     fun start() {
         scope.coroutineContext.cancelChildren()
 
-        // 1. 高频任务：位置 + 距离 + 地址
-        startLocationDataUpdates()
+        // 1. 高频任务：位置 + 距离 更新
+        startHighFrequencyDataUpdates()
 
-        // 2. 低频任务：GPS 信号强度
+        // 2. 低频任务：地址更新
+        startAddressUpdates()
+
+        // 3. 低频任务：GPS 信号强度更新
         startGpsStatusUpdates()
 
-        // 3. 低频任务：网络状态
+        // 4. 低频任务：网络状态更新
         startNetworkStatusUpdates()
 
         locationProvider.startLocationUpdates()
+
+        gpsSignalProvider.startGpsSignalUpdates()
     }
 
+    /**
+     * 停止所有数据更新任务并取消协程。
+     * 通常在 Activity/Fragment 的 onDestroy 中调用。
+     */
     fun stop() {
         scope.coroutineContext.cancelChildren()
     }
 
-    private fun startLocationDataUpdates() {
+    /**
+     * 启动高频数据更新任务。
+     *
+     * 将位置流 ([LocationProvider.getLocationFlow]) 和距离流 ([LocationProvider.getDistanceFlow]) 合并。
+     *
+     * **前端交互：**
+     * 调用 `window.JSBridge.updateDashboard(json)`
+     *
+     * @see HighFrequencyData
+     */
+    private fun startHighFrequencyDataUpdates() {
         scope.launch {
             combine(
                 locationProvider.getLocationFlow(),
                 locationProvider.getDistanceFlow()
             ) { location, totalDist ->
                 if (location != null) {
-                    // 1. 构建仪表盘数据
-                    val data = HighFrequencyData(
+                    HighFrequencyData(
                         timeDiff = location.time - System.currentTimeMillis(),
                         lat = location.latitude,
                         lng = location.longitude,
                         totalDistance = totalDist
                     )
-
-                    // 2. 提取地址 (来自 AmapLocationProvider 放入的 Bundle)
-                    val address = location.extras?.getString("address") ?: "获取地址失败"
-
-                    Log.d("AddressCheck", "当前获取到的地址: $address")
-
-                    Pair(gson.toJson(data), address)
                 } else {
                     null
                 }
-            }.collectLatest { pair ->
-                pair?.let { (jsonData, address) ->
-                    // 发送仪表盘数据 (高频)
-                    webView.evaluateJavascript("window.JSBridge.updateDashboard('$jsonData')", null)
-
-                    // 发送地址数据 (仅当变化时发送，优化性能)
-                    if (address != lastSentAddress) {
-                        lastSentAddress = address
-                        webView.evaluateJavascript("window.JSBridge.updateAddress('$address')", null)
-                    }
+            }.collectLatest { data ->
+                data?.let {
+                    val json = gson.toJson(it)
+                    webView.evaluateJavascript("window.JSBridge.updateDashboard('$json')", null)
                 }
             }
         }
     }
 
+    /**
+     * 启动地址更新任务。
+     *
+     * 从位置流中提取 `extras` 里的地址信息。
+     * 使用 [distinctUntilChanged] 操作符进行流式去重，仅当地址字符串发生实质变化时才通知前端。
+     *
+     * **前端交互：**
+     * 调用 `window.JSBridge.updateAddress(addressString)`
+     */
+    private fun startAddressUpdates() {
+        scope.launch {
+            locationProvider.getLocationFlow()
+                .filterNotNull()
+                .map { location ->
+                    val address = location.extras?.getString("address") ?: "获取地址失败"
+                    Log.d("AddressCheck", "流中获取到的地址: $address")
+                    address
+                }
+                .distinctUntilChanged() // KDoc: 仅当下游数据与上一次发射的数据不同时才通过
+                .collectLatest { address ->
+                    Log.d("AddressCheck", "发送给前端的新地址: $address")
+                    webView.evaluateJavascript("window.JSBridge.updateAddress('$address')", null)
+                }
+        }
+    }
+
+    /**
+     * 启动 GPS 信号强度更新任务。
+     *
+     * **前端交互：**
+     * 调用 `window.JSBridge.updateGpsLevel(level)`
+     */
     private fun startGpsStatusUpdates() {
         scope.launch {
-            gpsSignalProvider.gpsLevelFlow
+            gpsSignalProvider.getGpsLevelFlow()
                 .collect { level ->
                     val script = "window.JSBridge.updateGpsLevel($level)"
                     webView.evaluateJavascript(script, null)
@@ -102,6 +165,14 @@ class DashboardUpdater(
         }
     }
 
+    /**
+     * 启动网络信号强度更新任务。
+     *
+     * 仅当信号等级发生变化时才通知前端。
+     *
+     * **前端交互：**
+     * 调用 `window.JSBridge.updateNetLevel(level)`
+     */
     private fun startNetworkStatusUpdates() {
         scope.launch {
             networkStatusProvider.networkStatusFlow

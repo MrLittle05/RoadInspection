@@ -11,6 +11,7 @@ import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
@@ -22,7 +23,9 @@ class GpsSignalProvider(private val context: Context) {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     private val _gpsLevelState = MutableStateFlow(0)
-    val gpsLevelFlow = _gpsLevelState.asStateFlow()
+    private val gpsLevelFlow = _gpsLevelState.asStateFlow()
+
+    fun getGpsLevelFlow(): StateFlow<Int> = gpsLevelFlow
 
     fun startGpsSignalUpdates() {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
