@@ -35,9 +35,9 @@ class FakeRepository : RoadInspectionRepository {
     // 下面这些暂时用不到，给个空实现或默认值即可
     override fun getInspections(): Flow<List<Inspection>> = flowOf(emptyList())
     override fun getInspectionPoints(inspectionId: Long): Flow<List<InspectionPoint>> = flowOf(emptyList())
-//    override suspend fun getInspectionById(inspectionId: Long): Inspection? = null
-//    override suspend fun addInspectionPoint(point: InspectionPoint) {}
-//    override suspend fun deleteInspectionPoint(point: InspectionPoint) {}
+    override suspend fun getInspectionById(inspectionId: Long): Inspection? = null
+    override suspend fun addInspectionPoint(point: InspectionPoint) {}
+    override suspend fun deleteInspectionPoint(point: InspectionPoint) {}
     override suspend fun deleteInspection(inspection: Inspection) {}
     override suspend fun getPendingPoints(): List<InspectionPoint> = emptyList()
     override suspend fun updatePointStatus(pointId: Long, status: Int, serverUrl: String?) {}

@@ -17,6 +17,26 @@ interface RoadInspectionRepository {
     // 获取某次巡检的所有点流
     fun getInspectionPoints(inspectionId: Long): Flow<List<InspectionPoint>>
 
+    // ============ 查询操作 ============
+
+    suspend fun getInspectionById(inspectionId: Long): Inspection?
+
+    // ============ 插入/删除 单个巡检点 (UI 或 Manager 调用) ============
+
+    /**
+     * 新增一个巡检点。
+     * 这是一个数据库 IO 操作，因此被声明为 suspend 函数。
+     * @param point 要添加的巡检点对象
+     */
+    suspend fun addInspectionPoint(point: InspectionPoint)
+
+    /**
+     * 删除一个巡检点。
+     * 这是一个数据库 IO 操作，因此被声明为 suspend 函数。
+     * @param point 要删除的巡检点对象
+     */
+    suspend fun deleteInspectionPoint(point: InspectionPoint)
+
     // ============ 巡检业务操作 (InspectionManager 调用) ============
 
     // 1. 开始巡检 (返回 inspectionId 用于后续关联)

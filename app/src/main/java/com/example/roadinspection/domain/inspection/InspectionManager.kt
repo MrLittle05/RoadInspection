@@ -101,41 +101,40 @@ class InspectionManager(
      * 核心业务逻辑封装：拍照 -> 拿定位 -> 查地址 -> (未来存库)
      */
     private fun performCapture(isAuto: Boolean) {
+        // 1. 【关键一步】在发起拍照请求的瞬间，立刻锁定当前位置
+        // 这时候拿到的就是“按下快门时”的位置，而不是“保存完图片时”的位置
+        val frozenLocation = locationProvider.locationFlow.value
+
+        // 如果此时没有定位，可能需要根据业务决定是“放弃拍照”还是“先存图但无坐标”
+        if (frozenLocation == null) {
+            Log.w("Inspection", "当前无定位，跳过此次拍照")
+            return
+        }
+
+        // 2. 发起拍照
         cameraHelper.takePhoto(
             isAuto = isAuto,
-            // 这是一个普通的回调 (Normal Function)
             onSuccess = { savedUri ->
+                // 📸 拍照成功 (可能已经过了 500ms - 1s)
 
-                // ❌ 错误：不能直接在这里调用 saveRecord
-                // repository.saveRecord(...)
-
-                // ✅ 正确：启动一个协程 (Coroutine Context)
                 scope.launch(Dispatchers.IO) {
+                    // 3. 使用“冻结”的位置去查地址
+                    // 虽然现在车已经开远了，但我们要查的是“拍照那个点”的地址
+                    val addressStr = addressProvider.resolveAddress(frozenLocation)
 
-                    // 1. 先拿到数据 (此时是 Location? 类型)
-                    val currentLocation = locationProvider.locationFlow.value
+                    Log.d("Inspection", "位置锁定: ${frozenLocation.latitude}, ${frozenLocation.longitude}")
 
-                    // 2. 先判空！(不要在外面调用函数)
-                    if (currentLocation != null) {
-                        // ✅ 只有进入这个花括号内部，Kotlin 才确信 currentLocation 不是 null
+                    // 4. 存库
+                    // 注意：这里传入的是 frozenLocation，确保数据一致性
+                    repository.saveRecord(
+                        inspectionId = currentInspectionId,
+                        photoPath = savedUri.toString(),
+                        location = frozenLocation,
+                        address = addressStr
+                    )
 
-                        // 3. 在这里调用查地址 (这是正确的位置)
-                        val address = addressProvider.resolveAddress(currentLocation)
-
-                        // 4. 在这里调用存库
-                        repository.saveRecord(
-                            inspectionId = currentInspectionId,
-                            photoPath = savedUri.toString(),
-                            location = currentLocation,
-                            address = address
-                        )
-
-                        Log.d("Inspection", "保存成功")
-                    } else {
-                        Log.e("Inspection", "无法保存：当前没有定位信息")
-                    }
-
-                    Log.d("Inspection", "保存成功")
+                    // 5. 更新 UI
+                    onImageSaved(savedUri)
                 }
             },
             onError = { Log.e("Manager", "Capture failed: $it") }
