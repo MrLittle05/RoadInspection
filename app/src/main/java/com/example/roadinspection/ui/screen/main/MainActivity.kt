@@ -39,7 +39,6 @@ import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
-import com.example.roadinspection.ui.bridge.AndroidNativeApi
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.utils.DashboardUpdater

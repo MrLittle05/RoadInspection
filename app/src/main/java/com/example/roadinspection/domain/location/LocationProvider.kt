@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
-import com.example.roadinspection.utils.KalmanFilter
+import com.example.roadinspection.utils.KalmanLatLong
 
 /**
  * 接口定义 (保持在类外部，确保可见性)
@@ -31,7 +31,7 @@ class LocationProvider(private val context: Context) {
     private var locationUpdateProvider: LocationUpdateProvider? = null
 
     // 初始化卡尔曼滤波器
-    private val kalmanFilter = KalmanFilter()
+    private val kalmanFilter = KalmanLatLong()
 
     // 3. 算法状态变量
     private var isUpdatingDistance = false
@@ -87,13 +87,15 @@ class LocationProvider(private val context: Context) {
         val locationAgeNs = SystemClock.elapsedRealtimeNanos() - rawLocation.elapsedRealtimeNanos
         if (locationAgeNs > 10_000_000_000L) return
 
+        val validSpeed = if (rawLocation.hasSpeed()) rawLocation.speed else -1f
+
         // 2. 卡尔曼滤波处理 (平滑经纬度，减少 GPS 抖动)
         kalmanFilter.process(
             latMeasurement = rawLocation.latitude,
             lngMeasurement = rawLocation.longitude,
             accuracy = rawLocation.accuracy,
-            timestampMs = rawLocation.time,
-            currentSpeed = rawLocation.speed // 如果高德没返回速度，这里可能是 0
+            timestampMs = rawLocation.elapsedRealtimeNanos / 1_000_000L,
+            currentSpeed = validSpeed
         )
 
         // 3. 构建平滑后的 Location 对象
