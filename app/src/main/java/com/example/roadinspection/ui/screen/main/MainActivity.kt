@@ -41,6 +41,7 @@ import com.example.roadinspection.domain.network.NetworkStatusProvider
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
+import com.example.roadinspection.data.repository.FakeRepository
 
 class MainActivity : ComponentActivity() {
 
@@ -206,9 +207,10 @@ fun WebViewScreen(
         webViewRef?.notifyJsUpdatePhoto(uri)
     }
 
+    val fakeRepository = remember { FakeRepository() }
     // InspectionManager
     val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
-        InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved)
+        InspectionManager(context, locationProvider, cameraHelper, scope, onImageSaved, FakeRepository())
     }
 
     // Image Launcher

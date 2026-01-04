@@ -26,17 +26,19 @@ interface RoadInspectionRepository {
     suspend fun endInspection(inspectionId: Long, endTime: Date)
 
     /**
-     * 3. 核心保存方法
-     * Repository 层负责：
-     * a. 将 Bitmap 压缩为 WebP 并保存到私有目录
-     * b. 生成 InspectionPoint 对象
-     * c. 插入数据库
-     * 这样 InspectionManager 不需要关心文件 IO
+     * 修改后的保存方法：
+     * 不再负责存文件 (假设 CameraHelper 已经存好了)，
+     * 只负责将“文件路径”和“地理位置”写入数据库。
+     *
+     * @param inspectionId 当前巡检的 ID
+     * @param photoPath 图片在手机里的绝对路径 (或 Uri.toString())
+     * @param location 地理坐标
+     * @param address 中文地址
      */
     suspend fun saveRecord(
         inspectionId: Long,
-        bitmap: Bitmap,
-        location: Location?,
+        photoPath: String, // 👈 变动点：这里只收路径，不收 Bitmap
+        location: android.location.Location?,
         address: String
     )
 

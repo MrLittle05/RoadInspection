@@ -12,6 +12,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import com.example.roadinspection.data.repository.RoadInspectionRepository
+import java.util.Date
 
 class InspectionManager(
     private val context: Context,
@@ -19,7 +21,9 @@ class InspectionManager(
     private val cameraHelper: CameraHelper,
     private val scope: CoroutineScope,
     // 注意：根据文档建议，后期这里应该替换为 Repository，目前先保留用于测试
-    private val onImageSaved: (Uri) -> Unit
+    private val onImageSaved: (Uri) -> Unit,
+
+    private val repository: RoadInspectionRepository
 ) {
     // 2. 实例化 AddressProvider (Day 1 任务产出)
     private val addressProvider = AddressProvider(context)
@@ -27,6 +31,9 @@ class InspectionManager(
     private var autoCaptureJob: Job? = null
     private var lastCaptureDistance = 0f
     private val PHOTO_INTERVAL_METERS = 10.0
+
+    // 用于记录当前巡检任务的 ID，默认为 -1 (表示未开始)
+    private var currentInspectionId: Long = -1L
 
     // ... startInspection 和 stopInspection 保持不变 ...
 
@@ -38,15 +45,37 @@ class InspectionManager(
         } else {
             context.startService(intent)
         }
-        locationProvider.resetDistanceCounter()
-        lastCaptureDistance = 0f
-        startAutoCaptureFlow()
+        // ==================================================
+        // ✨ 核心修改：向数据库申请新的 ID
+        // ==================================================
+        scope.launch {
+            // 调用 Repository，在数据库创建一条新记录，并拿到它的自增 ID
+            // 注意：这里需要 import java.util.Date
+            currentInspectionId = repository.startInspection(java.util.Date())
+
+            Log.d("Inspection", "巡检开始，本次任务ID: $currentInspectionId")
+
+            // 拿到 ID 后，再开始记录里程和监听拍照
+            // 这样能确保后续所有照片都能关联到正确的 ID
+            locationProvider.resetDistanceCounter()
+            lastCaptureDistance = 0f
+            startAutoCaptureFlow()
+        }
     }
 
     fun stopInspection() {
         context.stopService(Intent(context, KeepAliveService::class.java))
         locationProvider.stopDistanceCounter()
         autoCaptureJob?.cancel()
+
+        // ✨ 记录结束时间
+        if (currentInspectionId != -1L) {
+            scope.launch {
+                repository.endInspection(currentInspectionId, java.util.Date())
+                currentInspectionId = -1L // 重置
+                Log.d("Inspection", "巡检结束")
+            }
+        }
     }
 
     private fun startAutoCaptureFlow() {
@@ -74,26 +103,39 @@ class InspectionManager(
     private fun performCapture(isAuto: Boolean) {
         cameraHelper.takePhoto(
             isAuto = isAuto,
+            // 这是一个普通的回调 (Normal Function)
             onSuccess = { savedUri ->
-                // 📸 1. 拍照成功，拿到了 Uri
 
-                // 启动协程处理后续耗时操作 (查地址是耗时的)
+                // ❌ 错误：不能直接在这里调用 saveRecord
+                // repository.saveRecord(...)
+
+                // ✅ 正确：启动一个协程 (Coroutine Context)
                 scope.launch(Dispatchers.IO) {
+
+                    // 1. 先拿到数据 (此时是 Location? 类型)
                     val currentLocation = locationProvider.locationFlow.value
 
+                    // 2. 先判空！(不要在外面调用函数)
                     if (currentLocation != null) {
-                        // 📍 2. 调用 AddressProvider (这正是你要的那一行代码)
-                        // 它会自动判断是直接从 extras 拿，还是去联网查
-                        val addressStr = addressProvider.resolveAddress(currentLocation)
+                        // ✅ 只有进入这个花括号内部，Kotlin 才确信 currentLocation 不是 null
 
-                        Log.d("Inspection", "业务闭环: Uri=$savedUri, Addr=$addressStr")
+                        // 3. 在这里调用查地址 (这是正确的位置)
+                        val address = addressProvider.resolveAddress(currentLocation)
 
-                        // 💾 3. Day 2 任务预留位置：
-                        // repository.saveRecord(savedUri, currentLocation, addressStr)
+                        // 4. 在这里调用存库
+                        repository.saveRecord(
+                            inspectionId = currentInspectionId,
+                            photoPath = savedUri.toString(),
+                            location = currentLocation,
+                            address = address
+                        )
+
+                        Log.d("Inspection", "保存成功")
+                    } else {
+                        Log.e("Inspection", "无法保存：当前没有定位信息")
                     }
 
-                    // 临时回调给 UI 显示
-                    onImageSaved(savedUri)
+                    Log.d("Inspection", "保存成功")
                 }
             },
             onError = { Log.e("Manager", "Capture failed: $it") }
