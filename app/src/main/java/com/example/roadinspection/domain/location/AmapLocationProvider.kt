@@ -22,6 +22,7 @@ class AmapLocationProvider(
         val locationOption = AMapLocationClientOption().apply {
             locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
             isNeedAddress = true // 👈 改为 true，让定位直接返回地址
+            isSensorEnable = true
             interval = 1000 // 依然保持1秒定位一次
         }
 
