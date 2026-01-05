@@ -103,13 +103,13 @@ class DashboardUpdater(
             combine(
                 locationProvider.getLocationFlow(),
                 locationProvider.getDistanceFlow()
-            ) { location, totalDist ->
+            ) { location, totalDistance ->
                 if (location != null) {
                     HighFrequencyData(
                         timeDiff = location.time - System.currentTimeMillis(),
                         lat = location.latitude,
                         lng = location.longitude,
-                        totalDistance = totalDist
+                        totalDistance = totalDistance / 1000f
                     )
                 } else {
                     null

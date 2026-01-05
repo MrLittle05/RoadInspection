@@ -39,9 +39,9 @@ class LocationProvider(private val context: Context) {
     private var warmUpCounter = 5 // 预热计数器，过滤刚开始定位时的不稳定点
 
     init {
-        // 定义回调：AmapLocationProvider 拿到原始数据后，交给 processLocation 处理
+        // 定义回调：AmapLocationProvider 拿到原始数据后，交给 processAndUpdateLocation 处理
         val onLocationResult: (Location) -> Unit = { rawLocation ->
-            processLocation(rawLocation)
+            processAndUpdateLocation(rawLocation)
         }
 
         // 初始化高德定位 (不再区分 GMS/HMS)
@@ -80,7 +80,7 @@ class LocationProvider(private val context: Context) {
      * 核心算法处理 (HEAD 的逻辑 - 已融合)
      * 负责：过滤陈旧数据 -> 卡尔曼滤波平滑 -> 复制地址信息 -> 更新 UI
      */
-    private fun processLocation(rawLocation: Location) {
+    private fun processAndUpdateLocation(rawLocation: Location) {
         // 1. 过滤陈旧数据 (>10秒前的缓存不要)
         // 注意：AmapLocationProvider 需要确保设置了 elapsedRealtimeNanos，否则这里可能误判
         // 如果 AMap 没返回纳秒时间，这里建议改用 System.currentTimeMillis() - rawLocation.time
@@ -170,9 +170,8 @@ class LocationProvider(private val context: Context) {
                 return
             }
 
-            // 7. 累加距离 (转换为千米)
-            // 注意：你的原逻辑是 += distanceDelta (米)，这里我除以 1000f 转为千米，适配 UI
-            _distanceState.value += distanceDelta / 1000f
+            // 7. 累加距离 (米)
+            _distanceState.value += distanceDelta
 
             lastValidLocation = filteredCurrent
         }
