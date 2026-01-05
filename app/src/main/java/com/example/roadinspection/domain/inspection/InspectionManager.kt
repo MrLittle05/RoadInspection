@@ -9,6 +9,7 @@ import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.address.AddressProvider
 import com.example.roadinspection.domain.location.LocationProvider
+import com.example.roadinspection.domain.iri.IriCalculator
 import com.example.roadinspection.service.KeepAliveService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,194 +20,260 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 巡检业务的核心管理器 (Domain Layer / Business Logic)。
+ * 巡检业务的核心管理器 (Domain Layer / Business Logic).
  *
- * **职责：**
- * 1. **流程控制**：协调定位服务、相机和前台保活服务的开启与关闭。
- * 2. **业务调度**：根据 [LocationProvider] 的距离变化触发定距拍照。
- * 3. **数据桥接**：调用 [InspectionRepository] 进行任务创建 (Create Task)、记录存储 (Save Record) 和任务结单 (Finish Task)。
+ * **核心职责：**
+ * 1. **全生命周期管理**：协调定位服务、相机、IRI 传感器和前台保活服务的开启与关闭。
+ * 2. **双流业务调度**：
+ * - **视觉流**：基于 10m 间隔触发自动病害拍照。
+ * - **数据流**：基于 50m 间隔触发 IRI (国际平整度) 计算与数据上报。
+ * 3. **数据桥接**：将底层的传感器/相机数据封装为业务对象 ([InspectionRecord], [IriResult]) 并持久化。
  *
- * **架构位置：**
- * 位于 UI 层（WebAppInterface）与 数据层（Repository）之间，充当“现场指挥官”的角色。
+ * **架构设计：**
+ * 采用“双协程流 (Dual Coroutine Flows)”模式，将高频的距离监听解耦为两个独立的业务动作，
+ * 互不阻塞，确保即便相机 I/O 耗时也不会影响 IRI 数据的连续采集。
  *
- * @property context 用于启动服务和获取资源。
- * @property repository 数据仓库，用于所有数据库操作。
- * @property locationProvider 位置提供者，提供实时里程和经纬度信息。
- * @property cameraHelper 相机助手，负责实际的拍照动作。
- * @property scope 用于执行数据库操作的协程作用域 (通常由 ViewModel 或 Application 提供)。
+ * @property context Android 上下文，用于启动服务。
+ * @property repository 数据仓库，处理数据库读写。
+ * @property locationProvider 位置服务，提供实时里程、经纬度和速度。
+ * @property cameraHelper 相机服务，执行实际拍摄。
+ * @property iriCalculator IRI 算法核心，负责传感器采集与平整度解算。
+ * @property scope 协程作用域，用于执行后台任务。
+ * @property onImageSaved 图片保存成功的回调 (用于更新 UI 相册缩略图)。
+ * @property onIriCalculated IRI 计算完成的回调 (用于更新 UI 实时图表)。
  */
-
 class InspectionManager(
     private val context: Context,
     private val repository: InspectionRepository,
     private val locationProvider: LocationProvider,
     private val cameraHelper: CameraHelper,
+    private val iriCalculator: IriCalculator,
     private val scope: CoroutineScope,
     private val onImageSaved: (Uri) -> Unit,
+    private val onIriCalculated: (IriCalculator.IriResult) -> Unit
 ) {
 
-    // 2. 实例化 AddressProvider (Day 1 任务产出)
+    // 基础设施组件
     private val addressProvider = AddressProvider(context)
+
+    // 协程任务句柄
     private var autoCaptureJob: Job? = null
+    private var iriCalculationJob: Job? = null
 
-    /** 上一次拍照时的累计里程 (米) */
-    private var lastCaptureDistance = 0f
-
-    /** 定距拍照的间隔 (米) */
-    private val PHOTO_INTERVAL_METERS = 10.0
-
-    /** 当前进行中的任务 ID。开始巡检时生成，结束时置空。 */
+    // 业务状态变量
+    /** 当前进行中的任务 ID */
     private var currentTaskId: String? = null
+    /** 上一次拍照时的累计里程 */
+    private var lastCaptureDistance = 0f
+    /** 上一次计算 IRI 时的累计里程 */
+    private var lastIriCalculationDistance = 0f
 
+    // 业务配置常量
     companion object {
         private const val TAG = "InspectionManager"
+        /** 定距拍照间隔 (米) - 关注路面病害细节 */
+        private const val PHOTO_INTERVAL_METERS = 10.0
+        /** IRI 计算间隔 (米) - 关注统计学平整度指标 (ASTM 标准建议) */
+        private const val IRI_CALC_INTERVAL_METERS = 50.0
     }
 
     // -------------------------------------------------------------------------
-    // Region: 核心业务流程
+    // Region: 核心业务流程 (Lifecycle)
     // -------------------------------------------------------------------------
 
     /**
-     * 开始巡检业务。
+     * 开启巡检任务。
      *
-     * **执行流程：**
-     * 1. 启动前台保活服务 [KeepAliveService]。
-     * 2. 在本地数据库创建一个新的 [InspectionTask]。
-     * 3. 重置位置计数器。
-     * 4. 开启自动定距拍照流程。
+     * **初始化流程：**
+     * 1. 启动前台服务保活。
+     * 2. 初始化数据库任务记录。
+     * 3. **关键**：启动 IRI 传感器监听 (加速度/重力)。
+     * 4. 开启 LocationProvider 距离累加。
+     * 5. 并行启动 [startAutoCaptureFlow] (拍照) 和 [startIriCalculationFlow] (IRI) 两个业务流。
      *
-     * @param title 任务标题（可选）。若未提供，将自动生成形如 "巡检任务 2023-10-01 12:00" 的标题。
+     * @param title 任务标题 (可选)
      */
     fun startInspection(title: String? = null) {
         scope.launch {
-            // 1. 启动保活服务 (确保息屏不断网/断定位)
+            // 1. 启动基础设施
             startKeepAliveService()
 
-            // 2. 生成默认标题 (如果前端没传)
+            // 2. 准备 IRI 传感器
+            if (!iriCalculator.startListening()) {
+                Log.e(TAG, "❌ Failed to start IRI sensors! Roughness data will be missing.")
+                // 工业级实践：此处应抛出 UI 事件提示用户设备不支持或权限缺失
+            }
+
+            // 3. 数据库建单
             val taskTitle = title ?: generateDefaultTitle()
-
-            // 3. 存库并获取 TaskID
             currentTaskId = repository.createTask(taskTitle)
-            Log.d(TAG, "Inspection started. TaskId: $currentTaskId")
+            Log.i(TAG, "Inspection started. TaskId: $currentTaskId")
 
-            // 4. 开始更新巡检里程，重置业务数据
+            // 4. 重置业务状态
             locationProvider.startDistanceUpdates()
             lastCaptureDistance = 0f
+            lastIriCalculationDistance = 0f
 
-            // 5. 开始监听距离变化
+            // 5. 启动双流业务
             startAutoCaptureFlow()
+            startIriCalculationFlow()
         }
     }
 
     /**
-     * 停止巡检业务。
+     * 停止巡检任务。
      *
-     * **执行流程：**
-     * 1. 停止前台保活服务。
-     * 2. 停止位置监听和自动拍照任务。
-     * 3. 在数据库中标记当前任务为“已完成”。
+     * **清理流程：**
+     * 1. 取消所有正在进行的协程任务 (拍照/计算)。
+     * 2. 停止位置服务和 IRI 传感器 (释放硬件资源)。
+     * 3. 停止前台服务。
+     * 4. 数据库结单。
      */
     fun stopInspection() {
-        // 1. 停止基础设施
-        stopKeepAliveService()
-        locationProvider.stopDistanceUpdates()
+        // 1. 停止业务流
         autoCaptureJob?.cancel()
+        iriCalculationJob?.cancel()
 
-        // 2. 更新数据库状态
+        // 2. 释放硬件资源
+        locationProvider.stopDistanceUpdates()
+        iriCalculator.stopListening()
+        stopKeepAliveService()
+
+        // 3. 数据库状态更新
         scope.launch {
             currentTaskId?.let { taskId ->
                 repository.finishTask(taskId)
-                Log.d(TAG, "Inspection finished. TaskId: $taskId")
+                Log.i(TAG, "Inspection finished. TaskId: $taskId")
             }
-            // 3. 清理内存状态
             currentTaskId = null
         }
     }
 
     /**
-     * 触发一次手动拍照。
+     * 执行手动拍照。
      *
-     * 适用于用户发现特定病害，手动点击界面按钮进行抓拍的场景。
-     * 照片将关联到当前正在进行的任务中。
+     * 即使在自动巡检过程中，用户也可以手动触发拍照记录特殊病害。
+     * 该操作不会干扰自动拍照和 IRI 计算的计数器。
      */
     fun manualCapture() {
         if (currentTaskId == null) {
-            Log.w(TAG, "Manual capture ignored: No active inspection task.")
+            Log.w(TAG, "Manual capture ignored: No active task.")
             return
         }
-        // 调用统一的拍照逻辑
         performCapture(isAuto = false)
     }
 
+    // -------------------------------------------------------------------------
+    // Region: 内部业务逻辑 (Business Flows)
+    // -------------------------------------------------------------------------
+
     /**
-     * 开启自动定距拍照流。
-     * 监听 [LocationProvider.distanceFlow]，每隔 [PHOTO_INTERVAL_METERS] 米触发一次拍照。
+     * 业务流 A：自动定距拍照
+     * 监听距离变化，每 [PHOTO_INTERVAL_METERS] 米触发一次 [performCapture]。
      */
     private fun startAutoCaptureFlow() {
         autoCaptureJob?.cancel()
         autoCaptureJob = scope.launch {
             locationProvider.getDistanceFlow().collect { totalDistance ->
-                // 判断是否达到拍照间隔
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
                     lastCaptureDistance = totalDistance
-
                     performCapture(isAuto = true)
+                }
+            }
+        }
+    }
+
+    /**
+     * 业务流 B：IRI 实时计算
+     * 监听距离变化，每 [IRI_CALC_INTERVAL_METERS] 米结算一次路面平整度。
+     *
+     * **逻辑：**
+     * 1. 检查距离是否达标 (如 50m)。
+     * 2. 从 [LocationProvider] 获取当前瞬时速度 (m/s -> km/h)。
+     * 3. 调用 [IriCalculator.computeAndClear] 结算这段距离内的震动数据。
+     * 4. 通过 [onIriCalculated] 回调通知 UI 绘制折线图。
+     */
+    private fun startIriCalculationFlow() {
+        iriCalculationJob?.cancel()
+        iriCalculationJob = scope.launch {
+            locationProvider.getDistanceFlow().collect { totalDistance ->
+                // 检查是否满足计算间隔 (50m)
+                if (totalDistance - lastIriCalculationDistance >= IRI_CALC_INTERVAL_METERS) {
+
+                    // 1. 计算实际段长 (可能略大于 50m，因为 GPS 刷新率限制)
+                    val segmentDistance = totalDistance - lastIriCalculationDistance
+
+                    // 2. 获取当前速度 (IRI 算法依赖速度进行归一化或质量评估)
+                    val location = locationProvider.getLocationFlow().value
+                    val speedKmh = (location?.speed ?: 0f) * 3.6f
+
+                    // 3. 执行核心计算 (线程安全)
+                    val result = iriCalculator.computeAndClear(
+                        avgSpeedKmh = speedKmh,
+                        distanceMeters = segmentDistance
+                    )
+
+                    // 4. 更新里程标尺
+                    lastIriCalculationDistance = totalDistance
+
+                    // 5. 分发结果
+                    if (result != null) {
+                        // 回调给 UI 层：x轴由 UI 维护(当前总里程)，y轴为 result.iriValue
+                        onIriCalculated(result)
+
+                        // TODO: 可选 - 将 track_segment (含 IRI) 存入数据库用于轨迹回放
+                        // repository.saveTrackSegment(taskId, totalDistance, result.iriValue, ...)
                     }
                 }
             }
         }
-
+    }
 
     /**
-     * 核心拍照逻辑 (融合版)
-     * * 结合了 Dev B 的并发安全逻辑 (位置冻结)
-     * 和 Dev A 的数据存储逻辑 (InspectionRecord)
+     * 统一拍照执行逻辑
+     *
+     * 包含：位置冻结 -> 拍照 -> 地址解析(异步) -> 存库 -> UI通知
      */
     private fun performCapture(isAuto: Boolean) {
         val taskId = currentTaskId ?: return
 
-        // 1. ✨ Dev B 核心逻辑：先冻结位置，防止车速过快导致漂移
-        val frozenLocation = locationProvider.getLocationFlow().value
-
-        if (frozenLocation == null) {
-            Log.w(TAG, "No location data, skipping capture.")
+        // 1. 冻结位置 (防止异步操作期间位置漂移)
+        val capturedLocation = locationProvider.getLocationFlow().value
+        if (capturedLocation == null) {
+            Log.w(TAG, "Skipping capture: Location unknown.")
             return
         }
 
-        // 2. 执行拍照
         cameraHelper.takePhoto(
             isAuto = isAuto,
             onSuccess = { savedUri ->
-
-                // 3. 切回 IO 线程处理数据 (AddressProvider 是挂起函数)
+                // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
                 scope.launch(Dispatchers.IO) {
+                    val addressStr = addressProvider.resolveAddress(capturedLocation)
 
-                    // ✨ Dev B 核心逻辑：使用冻结的位置去查地址
-                    val addressStr = addressProvider.resolveAddress(frozenLocation)
-
-                    // ✨ Dev A 核心逻辑：封装成 InspectionRecord 对象
                     val record = InspectionRecord(
                         taskId = taskId,
                         localPath = savedUri.toString(),
                         captureTime = System.currentTimeMillis(),
-                        latitude = frozenLocation.latitude,
-                        longitude = frozenLocation.longitude,
-                        address = addressStr, // 使用查到的地址
-                        syncStatus = 0 // 0 = Pending
+                        latitude = capturedLocation.latitude,
+                        longitude = capturedLocation.longitude,
+                        address = addressStr
                     )
 
-                    // 4. 存入数据库
                     repository.saveRecord(record)
-                    Log.d(TAG, "Record saved: ${record.localPath}, Addr: $addressStr")
+                    Log.v(TAG, "Captured: $savedUri @ $addressStr")
 
-                    // 5. 更新 UI
+                    // 3. 通知 UI
                     onImageSaved(savedUri)
                 }
-        },
-            onError = { error ->
-                Log.e(TAG, "Capture failed: $error")
-            })
+            },
+            onError = { error -> Log.e(TAG, "Capture failed: $error") }
+        )
     }
+
+    // -------------------------------------------------------------------------
+    // Region: 辅助方法
+    // -------------------------------------------------------------------------
 
     private fun startKeepAliveService() {
         val intent = Intent(context, KeepAliveService::class.java)

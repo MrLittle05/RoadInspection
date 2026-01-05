@@ -34,6 +34,7 @@ import androidx.core.content.ContextCompat
 import com.amap.api.services.core.ServiceSettings
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.domain.iri.IriCalculator
 import com.example.roadinspection.domain.camera.CameraHelper
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.domain.location.GpsSignalProvider
@@ -43,6 +44,7 @@ import com.example.roadinspection.ui.theme.GreetingCardTheme
 import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
+import com.example.roadinspection.utils.notifyJsUpdateIri
 import com.example.roadinspection.worker.WorkManagerConfig
 
 class MainActivity : ComponentActivity() {
@@ -207,6 +209,12 @@ fun WebViewScreen(
         CameraHelper(context, imageCapture)
     }
 
+    // IriCalculator
+    val iriCalculator = remember(context) {
+        // 这里传入标定系数 5.0f (示例值，实际应从配置读取)
+        IriCalculator(context, calibrationFactor = 5.0f)
+    }
+
     // InspectionRepository
     val database = remember { AppDatabase.getDatabase(context) }
     val dao = remember { database.inspectionDao() }
@@ -217,9 +225,13 @@ fun WebViewScreen(
         webViewRef?.notifyJsUpdatePhoto(uri)
     }
 
+    val onIriCalculated: (IriCalculator.IriResult) -> Unit = { result ->
+        webViewRef?.notifyJsUpdateIri(result.iriValue, result.distanceMeters)
+    }
+
     // InspectionManager
     val inspectionManager = remember(context, locationProvider, cameraHelper, scope) {
-        InspectionManager(context, repository, locationProvider, cameraHelper, scope, onImageSaved)
+        InspectionManager(context, repository, locationProvider, cameraHelper, iriCalculator, scope, onImageSaved, onIriCalculated)
     }
 
     // Image Launcher
