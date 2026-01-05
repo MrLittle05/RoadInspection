@@ -174,39 +174,39 @@ class InspectionManager(
             return
         }
 
-    // 2. 执行拍照
-    cameraHelper.takePhoto(
-        isAuto = isAuto,
-        onSuccess = { savedUri ->
+        // 2. 执行拍照
+        cameraHelper.takePhoto(
+            isAuto = isAuto,
+            onSuccess = { savedUri ->
 
-            // 3. 切回 IO 线程处理数据 (AddressProvider 是挂起函数)
-            scope.launch(Dispatchers.IO) {
+                // 3. 切回 IO 线程处理数据 (AddressProvider 是挂起函数)
+                scope.launch(Dispatchers.IO) {
 
-                // ✨ Dev B 核心逻辑：使用冻结的位置去查地址
-                val addressStr = addressProvider.resolveAddress(frozenLocation)
+                    // ✨ Dev B 核心逻辑：使用冻结的位置去查地址
+                    val addressStr = addressProvider.resolveAddress(frozenLocation)
 
-                // ✨ Dev A 核心逻辑：封装成 InspectionRecord 对象
-                val record = InspectionRecord(
-                    taskId = taskId,
-                    localPath = savedUri.toString(),
-                    captureTime = System.currentTimeMillis(),
-                    latitude = frozenLocation.latitude,
-                    longitude = frozenLocation.longitude,
-                    address = addressStr, // 使用查到的地址
-                    syncStatus = 0 // 0 = Pending
-                )
+                    // ✨ Dev A 核心逻辑：封装成 InspectionRecord 对象
+                    val record = InspectionRecord(
+                        taskId = taskId,
+                        localPath = savedUri.toString(),
+                        captureTime = System.currentTimeMillis(),
+                        latitude = frozenLocation.latitude,
+                        longitude = frozenLocation.longitude,
+                        address = addressStr, // 使用查到的地址
+                        syncStatus = 0 // 0 = Pending
+                    )
 
-                // 4. 存入数据库
-                repository.saveRecord(record)
-                Log.d(TAG, "Record saved: ${record.localPath}, Addr: $addressStr")
+                    // 4. 存入数据库
+                    repository.saveRecord(record)
+                    Log.d(TAG, "Record saved: ${record.localPath}, Addr: $addressStr")
 
-                // 5. 更新 UI
-                onImageSaved(savedUri)
-            }
+                    // 5. 更新 UI
+                    onImageSaved(savedUri)
+                }
         },
-        onError = { error ->
-            Log.e(TAG, "Capture failed: $error")
-        })
+            onError = { error ->
+                Log.e(TAG, "Capture failed: $error")
+            })
     }
 
     private fun startKeepAliveService() {
