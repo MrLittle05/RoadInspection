@@ -7,8 +7,7 @@ import android.util.Log
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.domain.camera.CameraHelper
-import com.example.roadinspection.domain.location.AddressProvider1 // 1. 引入 AddressProvider
-import com.example.roadinspection.domain.location.AddressProvider
+import com.example.roadinspection.domain.address.AddressProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.service.KeepAliveService
 import kotlinx.coroutines.CoroutineScope

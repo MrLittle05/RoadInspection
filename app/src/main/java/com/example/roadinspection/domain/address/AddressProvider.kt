@@ -1,4 +1,4 @@
-package com.example.roadinspection.domain.location
+package com.example.roadinspection.domain.address
 
 import android.content.Context
 import android.location.Location
@@ -52,7 +52,8 @@ class AddressProvider(private val context: Context) {
                     GeocodeSearch.AMAP
                 )
 
-                geocodeSearch.setOnGeocodeSearchListener(object : GeocodeSearch.OnGeocodeSearchListener {
+                geocodeSearch.setOnGeocodeSearchListener(object :
+                    GeocodeSearch.OnGeocodeSearchListener {
                     override fun onRegeocodeSearched(result: RegeocodeResult?, rCode: Int) {
                         // 1000 代表成功
                         if (rCode == 1000 && result?.regeocodeAddress != null) {

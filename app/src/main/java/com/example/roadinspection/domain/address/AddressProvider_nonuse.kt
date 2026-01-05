@@ -8,7 +8,7 @@ import com.amap.api.services.geocoder.RegeocodeQuery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class AddressProvider1(private val context: Context) {
+class AddressProvider_nonuse(private val context: Context) {
 
     private val geocodeSearch = GeocodeSearch(context)
 
