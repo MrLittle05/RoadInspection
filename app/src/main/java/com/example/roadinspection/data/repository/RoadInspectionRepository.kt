@@ -73,4 +73,6 @@ interface RoadInspectionRepository {
     // ============ 清理操作 ============
 
     suspend fun deleteInspection(inspection: Inspection)
+
+    fun getUploadCountFlow(): Flow<Int>
 }

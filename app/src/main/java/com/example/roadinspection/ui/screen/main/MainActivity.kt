@@ -237,7 +237,7 @@ fun WebViewScreen(
                 settings.allowContentAccess = true
 
                 // 创建 Updater
-                val updater = DashboardUpdater(this, locationProvider, gpsSignalProvider, networkStatusProvider)
+                val updater = DashboardUpdater(this, locationProvider, gpsSignalProvider, networkStatusProvider, fakeRepository)
                 dashboardUpdaterRef.value = updater
 
                 webViewClient = object : WebViewClient() {

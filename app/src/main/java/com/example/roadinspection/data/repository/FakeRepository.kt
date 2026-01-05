@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.flowOf
 import java.util.Date
 import android.location.Location
 import android.util.Log
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.delay
 
 class FakeRepository : RoadInspectionRepository {
     // 假装启动了，返回一个固定的 ID 10086
@@ -41,4 +43,12 @@ class FakeRepository : RoadInspectionRepository {
     override suspend fun deleteInspection(inspection: Inspection) {}
     override suspend fun getPendingPoints(): List<InspectionPoint> = emptyList()
     override suspend fun updatePointStatus(pointId: Long, status: Int, serverUrl: String?) {}
+    override fun getUploadCountFlow(): Flow<Int> = flow {
+        // 模拟效果：刚开始有 5 个等待上传
+        emit(5)
+        delay(2000) // 2秒后
+        emit(4)     // 传完一个，剩 4 个
+        delay(2000)
+        emit(0)     // 全部传完
+    }
 }
