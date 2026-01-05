@@ -31,4 +31,8 @@ window.JSBridge = {
   updateLatestPhoto: function (uri) {
     nativeUI.updateLatestPhoto(uri);
   },
+
+  updateIriData: function (iriValue, segmentLength) {
+      nativeUI.updateIriData(iriValue, segmentLength);
+  },
 };

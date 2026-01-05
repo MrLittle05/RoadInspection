@@ -162,6 +162,23 @@ body {
   background: #ff3b30;
 }
 
+.iri-chart {
+  position: fixed;
+  top: 65%;
+  right: -13%;
+  z-index: 15;
+  background: transparent;
+  border-radius: 8px;
+  pointer-events: none;
+  width: 240px;
+  height: 120px;
+  transition: opacity 0.3s;
+}
+
+.iri-chart.hidden {
+  opacity: 0;
+}
+
 .zoom-floater {
   position: fixed;
   bottom: 160px;
@@ -377,4 +394,8 @@ body {
 
   transform-origin: center center;
   transform: rotate(-90deg);
+}
+
+.mode-portrait .iri-chart {
+  display: none !important;
 }

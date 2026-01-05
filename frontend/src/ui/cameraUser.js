@@ -1,3 +1,5 @@
+import nativeUI from "./cameraNative.js";
+
 const elements = {
   infoBtn: null,
   zoom1Btn: null,
@@ -199,6 +201,13 @@ function startRecording() {
     states.recordSeconds++;
     updateTimer();
   }, 1000);
+
+  // 重置图表数据
+  nativeUI.resetIriChart();
+
+  // 显示图表
+  const canvas = document.getElementById("iri-canvas");
+  if (canvas) canvas.classList.remove("hidden");
 }
 
 function stopRecording() {
@@ -211,6 +220,10 @@ function stopRecording() {
   states.recordSeconds = 0;
   updateTimer();
   clearInterval(states.timerInterval);
+
+  // 隐藏图表
+  const canvas = document.getElementById("iri-canvas");
+  if (canvas) canvas.classList.add("hidden");
 }
 
 function updateTimer() {

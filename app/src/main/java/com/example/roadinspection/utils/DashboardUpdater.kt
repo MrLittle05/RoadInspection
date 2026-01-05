@@ -119,14 +119,14 @@ class DashboardUpdater(
                         timeDiff = location.time - System.currentTimeMillis(),
                         lat = location.latitude,
                         lng = location.longitude,
-                        totalDistance = totalDistance / 1000f
+                        totalDistance = totalDistance
                     )
                 } else {
                     null
                 }
             }.collectLatest { data ->
                 data?.let {
-                    Log.v(TAG, "📡 高频数据更新: Lat=${it.lat}, Lng=${it.lng}, Dist=${it.totalDistance}km")
+                    Log.v(TAG, "📡 高频数据更新: Lat=${it.lat}, Lng=${it.lng}, Dist=${it.totalDistance}m")
                     val json = gson.toJson(it)
                     webView.evaluateJavascript("window.JSBridge.updateDashboard('$json')", null)
                 }

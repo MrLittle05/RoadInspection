@@ -2,7 +2,6 @@ package com.example.roadinspection.domain.inspection
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.util.Log
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.InspectionRecord
@@ -27,7 +26,7 @@ import java.util.Locale
  * 2. **双流业务调度**：
  * - **视觉流**：基于 10m 间隔触发自动病害拍照。
  * - **数据流**：基于 50m 间隔触发 IRI (国际平整度) 计算与数据上报。
- * 3. **数据桥接**：将底层的传感器/相机数据封装为业务对象 ([InspectionRecord], [IriResult]) 并持久化。
+ * 3. **数据桥接**：将底层的传感器/相机数据封装为业务对象 ([InspectionRecord], [IriCalculator.IriResult]) 并持久化。
  *
  * **架构设计：**
  * 采用“双协程流 (Dual Coroutine Flows)”模式，将高频的距离监听解耦为两个独立的业务动作，
@@ -49,7 +48,7 @@ class InspectionManager(
     private val cameraHelper: CameraHelper,
     private val iriCalculator: IriCalculator,
     private val scope: CoroutineScope,
-    private val onImageSaved: (Uri) -> Unit,
+    private val onImageSaved: (android.net.Uri) -> Unit,
     private val onIriCalculated: (IriCalculator.IriResult) -> Unit
 ) {
 
@@ -63,16 +62,20 @@ class InspectionManager(
     // 业务状态变量
     /** 当前进行中的任务 ID */
     private var currentTaskId: String? = null
+
     /** 上一次拍照时的累计里程 */
     private var lastCaptureDistance = 0f
+
     /** 上一次计算 IRI 时的累计里程 */
     private var lastIriCalculationDistance = 0f
 
     // 业务配置常量
     companion object {
         private const val TAG = "InspectionManager"
+
         /** 定距拍照间隔 (米) - 关注路面病害细节 */
         private const val PHOTO_INTERVAL_METERS = 10.0
+
         /** IRI 计算间隔 (米) - 关注统计学平整度指标 (ASTM 标准建议) */
         private const val IRI_CALC_INTERVAL_METERS = 50.0
     }
@@ -91,30 +94,37 @@ class InspectionManager(
      * 4. 开启 LocationProvider 距离累加。
      * 5. 并行启动 [startAutoCaptureFlow] (拍照) 和 [startIriCalculationFlow] (IRI) 两个业务流。
      *
-     * @param title 任务标题 (可选)
+     * @param title 任务标题 (可选，为空则自动生成时间戳标题)
      */
     fun startInspection(title: String? = null) {
+        Log.i(TAG, "🟢 正在启动巡检任务...")
         scope.launch {
             // 1. 启动基础设施
+            Log.d(TAG, "1. 启动前台保活服务")
             startKeepAliveService()
 
             // 2. 准备 IRI 传感器
-            if (!iriCalculator.startListening()) {
-                Log.e(TAG, "❌ Failed to start IRI sensors! Roughness data will be missing.")
+            Log.d(TAG, "2. 初始化 IRI 传感器监听")
+            if (iriCalculator.startListening()) {
+                Log.i(TAG, "✅ IRI 传感器启动成功")
+            } else {
+                Log.e(TAG, "❌ IRI 传感器启动失败! 平整度数据将缺失")
                 // 工业级实践：此处应抛出 UI 事件提示用户设备不支持或权限缺失
             }
 
             // 3. 数据库建单
             val taskTitle = title ?: generateDefaultTitle()
             currentTaskId = repository.createTask(taskTitle)
-            Log.i(TAG, "Inspection started. TaskId: $currentTaskId")
+            Log.i(TAG, "3. 任务创建成功 TaskId: $currentTaskId, Title: $taskTitle")
 
             // 4. 重置业务状态
+            Log.d(TAG, "4. 重置里程计数器")
             locationProvider.startDistanceUpdates()
             lastCaptureDistance = 0f
             lastIriCalculationDistance = 0f
 
             // 5. 启动双流业务
+            Log.i(TAG, "5. 启动双流业务调度 (拍照间隔: ${PHOTO_INTERVAL_METERS}m, IRI间隔: ${IRI_CALC_INTERVAL_METERS}m)")
             startAutoCaptureFlow()
             startIriCalculationFlow()
         }
@@ -130,20 +140,27 @@ class InspectionManager(
      * 4. 数据库结单。
      */
     fun stopInspection() {
+        Log.i(TAG, "🔴 正在停止巡检任务...")
+
         // 1. 停止业务流
         autoCaptureJob?.cancel()
         iriCalculationJob?.cancel()
+        Log.d(TAG, "1. 业务协程流已取消")
 
         // 2. 释放硬件资源
         locationProvider.stopDistanceUpdates()
         iriCalculator.stopListening()
-        stopKeepAliveService()
+        Log.d(TAG, "2. 硬件资源 (GPS/传感器) 已释放")
 
-        // 3. 数据库状态更新
+        // 3. 停止服务
+        stopKeepAliveService()
+        Log.d(TAG, "3. 前台服务已停止")
+
+        // 4. 数据库状态更新
         scope.launch {
             currentTaskId?.let { taskId ->
                 repository.finishTask(taskId)
-                Log.i(TAG, "Inspection finished. TaskId: $taskId")
+                Log.i(TAG, "✅ 任务结单完成 TaskId: $taskId")
             }
             currentTaskId = null
         }
@@ -157,9 +174,10 @@ class InspectionManager(
      */
     fun manualCapture() {
         if (currentTaskId == null) {
-            Log.w(TAG, "Manual capture ignored: No active task.")
+            Log.w(TAG, "⚠️ 手动拍照请求被忽略: 当前无进行中的任务")
             return
         }
+        Log.i(TAG, "📸 触发手动拍照")
         performCapture(isAuto = false)
     }
 
@@ -173,9 +191,11 @@ class InspectionManager(
      */
     private fun startAutoCaptureFlow() {
         autoCaptureJob?.cancel()
+        Log.d(TAG, "启动自动拍照流监听...")
         autoCaptureJob = scope.launch {
             locationProvider.getDistanceFlow().collect { totalDistance ->
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
+                    Log.d(TAG, "📏 里程达标 (拍照): Current=${"%.2f".format(totalDistance)}m, Last=${"%.2f".format(lastCaptureDistance)}m")
                     lastCaptureDistance = totalDistance
                     performCapture(isAuto = true)
                 }
@@ -195,6 +215,7 @@ class InspectionManager(
      */
     private fun startIriCalculationFlow() {
         iriCalculationJob?.cancel()
+        Log.d(TAG, "启动 IRI 计算流监听...")
         iriCalculationJob = scope.launch {
             locationProvider.getDistanceFlow().collect { totalDistance ->
                 // 检查是否满足计算间隔 (50m)
@@ -207,6 +228,8 @@ class InspectionManager(
                     val location = locationProvider.getLocationFlow().value
                     val speedKmh = (location?.speed ?: 0f) * 3.6f
 
+                    Log.v(TAG, "📊 触发 IRI 计算: 段长=${"%.1f".format(segmentDistance)}m, 速度=${"%.1f".format(speedKmh)}km/h")
+
                     // 3. 执行核心计算 (线程安全)
                     val result = iriCalculator.computeAndClear(
                         avgSpeedKmh = speedKmh,
@@ -218,11 +241,14 @@ class InspectionManager(
 
                     // 5. 分发结果
                     if (result != null) {
+                        Log.i(TAG, "✅ IRI 计算完成: Val=${result.iriValue}, Quality=${result.qualityIndex}")
                         // 回调给 UI 层：x轴由 UI 维护(当前总里程)，y轴为 result.iriValue
                         onIriCalculated(result)
 
                         // TODO: 可选 - 将 track_segment (含 IRI) 存入数据库用于轨迹回放
                         // repository.saveTrackSegment(taskId, totalDistance, result.iriValue, ...)
+                    } else {
+                        Log.w(TAG, "⚠️ IRI 计算结果为空 (可能因数据样本不足或速度异常)")
                     }
                 }
             }
@@ -233,23 +259,31 @@ class InspectionManager(
      * 统一拍照执行逻辑
      *
      * 包含：位置冻结 -> 拍照 -> 地址解析(异步) -> 存库 -> UI通知
+     *
+     * @param isAuto 是否为自动触发 (用于日志区分)
      */
     private fun performCapture(isAuto: Boolean) {
         val taskId = currentTaskId ?: return
+        val modeStr = if (isAuto) "自动" else "手动"
 
         // 1. 冻结位置 (防止异步操作期间位置漂移)
         val capturedLocation = locationProvider.getLocationFlow().value
         if (capturedLocation == null) {
-            Log.w(TAG, "Skipping capture: Location unknown.")
+            Log.w(TAG, "⚠️ 跳过拍照 ($modeStr): 当前位置信息未知")
             return
         }
+
+        Log.v(TAG, "⚡ 开始执行拍照 ($modeStr)...")
 
         cameraHelper.takePhoto(
             isAuto = isAuto,
             onSuccess = { savedUri ->
                 // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
                 scope.launch(Dispatchers.IO) {
+                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在解析地址...")
+
                     val addressStr = addressProvider.resolveAddress(capturedLocation)
+                    Log.d(TAG, "📍 地址解析完成: $addressStr")
 
                     val record = InspectionRecord(
                         taskId = taskId,
@@ -261,13 +295,15 @@ class InspectionManager(
                     )
 
                     repository.saveRecord(record)
-                    Log.v(TAG, "Captured: $savedUri @ $addressStr")
+                    Log.i(TAG, "💾 记录已写入数据库 [${record.id}]")
 
                     // 3. 通知 UI
                     onImageSaved(savedUri)
                 }
             },
-            onError = { error -> Log.e(TAG, "Capture failed: $error") }
+            onError = { error ->
+                Log.e(TAG, "❌ 拍照失败 ($modeStr): $error")
+            }
         )
     }
 
@@ -276,16 +312,24 @@ class InspectionManager(
     // -------------------------------------------------------------------------
 
     private fun startKeepAliveService() {
-        val intent = Intent(context, KeepAliveService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            val intent = Intent(context, KeepAliveService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "启动保活服务异常", e)
         }
     }
 
     private fun stopKeepAliveService() {
-        context.stopService(Intent(context, KeepAliveService::class.java))
+        try {
+            context.stopService(Intent(context, KeepAliveService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "停止保活服务异常", e)
+        }
     }
 
     private fun generateDefaultTitle(): String {
