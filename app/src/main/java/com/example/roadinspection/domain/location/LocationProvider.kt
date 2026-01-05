@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
 import com.example.roadinspection.utils.KalmanLatLong
+import android.util.Log
 
 /**
  * 接口定义 (保持在类外部，确保可见性)
@@ -37,6 +38,10 @@ class LocationProvider(private val context: Context) {
     private var isUpdatingDistance = false
     private var lastValidLocation: Location? = null
     private var warmUpCounter = 5 // 预热计数器，过滤刚开始定位时的不稳定点
+
+    companion object {
+        private const val TAG = "LocationProvider"
+    }
 
     init {
         // 定义回调：AmapLocationProvider 拿到原始数据后，交给 processAndUpdateLocation 处理
@@ -81,15 +86,17 @@ class LocationProvider(private val context: Context) {
      * 负责：过滤陈旧数据 -> 卡尔曼滤波平滑 -> 复制地址信息 -> 更新 UI
      */
     private fun processAndUpdateLocation(rawLocation: Location) {
+        Log.d(TAG, "3. LocationProvider收到Raw: lat=${rawLocation.latitude}, time=${rawLocation.elapsedRealtimeNanos}")
         // 1. 过滤陈旧数据 (>10秒前的缓存不要)
         // 注意：AmapLocationProvider 需要确保设置了 elapsedRealtimeNanos，否则这里可能误判
         // 如果 AMap 没返回纳秒时间，这里建议改用 System.currentTimeMillis() - rawLocation.time
         val locationAgeNs = SystemClock.elapsedRealtimeNanos() - rawLocation.elapsedRealtimeNanos
-        if (locationAgeNs > 10_000_000_000L) return
+        if (locationAgeNs > 10_000_000_000L) {
+            Log.w(TAG, "⚠️ 丢弃陈旧数据: Age=${locationAgeNs/1e9}s")
+            return
+        }
 
         val validSpeed = if (rawLocation.hasSpeed()) rawLocation.speed else -1f
-
-        if (rawLocation.accuracy > 20.0f) return
 
         // 2. 卡尔曼滤波处理 (平滑经纬度，减少 GPS 抖动)
         kalmanFilter.process(
@@ -117,6 +124,8 @@ class LocationProvider(private val context: Context) {
                 extras = rawLocation.extras
             }
         }
+
+        Log.v(TAG, "🔵 FILTERED Location: (${filteredLocation.latitude}, ${filteredLocation.longitude}， ${filteredLocation.extras})")
 
         // 4. 更新 UI Flow (Webview 接收到的是平滑后的坐标)
         _locationState.value = filteredLocation
@@ -174,6 +183,8 @@ class LocationProvider(private val context: Context) {
 
             // 7. 累加距离 (米)
             _distanceState.value += distanceDelta
+
+            Log.i(TAG, "✅ 里程 +${"%.2f".format(distanceDelta)}m | 总里程: ${"%.2f".format(_distanceState.value)}m")
 
             lastValidLocation = filteredCurrent
         }

@@ -50,6 +50,10 @@ class DashboardUpdater(
      */
     private val gson = Gson()
 
+    companion object {
+        private const val TAG = "DashboardUpdater"
+    }
+
     /**
      * 启动所有并行的数据监听任务。
      *
@@ -122,6 +126,7 @@ class DashboardUpdater(
                 }
             }.collectLatest { data ->
                 data?.let {
+                    Log.v(TAG, "📡 高频数据更新: Lat=${it.lat}, Lng=${it.lng}, Dist=${it.totalDistance}km")
                     val json = gson.toJson(it)
                     webView.evaluateJavascript("window.JSBridge.updateDashboard('$json')", null)
                 }
@@ -144,12 +149,12 @@ class DashboardUpdater(
                 .filterNotNull()
                 .map { location ->
                     val address = location.extras?.getString("address") ?: "获取地址失败"
-                    Log.d("AddressCheck", "流中获取到的地址: $address")
+                    Log.d(TAG, "流中获取到的地址: $address")
                     address
                 }
                 .distinctUntilChanged() // KDoc: 仅当下游数据与上一次发射的数据不同时才通过
                 .collectLatest { address ->
-                    Log.d("AddressCheck", "发送给前端的新地址: $address")
+                    Log.d(TAG, "发送给前端的新地址: $address")
                     webView.evaluateJavascript("window.JSBridge.updateAddress('$address')", null)
                 }
         }
@@ -165,6 +170,7 @@ class DashboardUpdater(
         scope.launch {
             gpsSignalProvider.getGpsLevelFlow()
                 .collect { level ->
+                    Log.d(TAG, "🛰️ GPS 信号等级: $level")
                     val script = "window.JSBridge.updateGpsLevel($level)"
                     webView.evaluateJavascript(script, null)
                 }
@@ -185,6 +191,7 @@ class DashboardUpdater(
                 .map { it.signalLevel }
                 .distinctUntilChanged()
                 .collect { level ->
+                    Log.d(TAG, "🛰️ 网络信号等级: $level")
                     val script = "window.JSBridge.updateNetLevel($level)"
                     webView.evaluateJavascript(script, null)
                 }
@@ -208,6 +215,6 @@ class DashboardUpdater(
             webView.evaluateJavascript(jsCode, null)
         }
 
-        Log.d("Dashboard", "推送给前端待上传数: $count")
+        Log.d(TAG, "推送给前端待上传数: $count")
     }
 }

@@ -14,6 +14,10 @@ class AmapLocationProvider(
 
     private var locationClient: AMapLocationClient? = null
 
+    companion object {
+        private const val TAG = "Amap"
+    }
+
     init {
         // 初始化定位客户端
         locationClient = AMapLocationClient(context)
@@ -47,13 +51,15 @@ class AmapLocationProvider(
                     extras = bundle
                 }
 
+                Log.d(TAG, "AMap收到数据: ${amapLocation.toStr()}")
+
                 // 3. 重要：调用回调，通知 LocationProvider 数据更新了
                 onLocationResult(location)
 
-                Log.d("AmapLog", "数据已传出: ${amapLocation.address}")
+                Log.d("AmapLog", "2. 回调 onLocationResult 已执行")
             } else if (amapLocation != null) {
                 // 如果失败，打印错误码（这对排查小米问题至关重要）
-                Log.e("AmapLog", "定位失败码: ${amapLocation.errorCode}, 信息: ${amapLocation.errorInfo}")
+                Log.e(TAG, "定位失败码: ${amapLocation.errorCode}, 信息: ${amapLocation.errorInfo}")
             }
         }
     }
