@@ -7,10 +7,12 @@ import android.util.Log
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.domain.camera.CameraHelper
+import com.example.roadinspection.domain.location.AddressProvider1 // 1. 引入 AddressProvider
+import com.example.roadinspection.domain.location.AddressProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.service.KeepAliveService
-import com.example.roadinspection.worker.WorkManagerConfig
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -34,16 +36,18 @@ import java.util.Locale
  * @property cameraHelper 相机助手，负责实际的拍照动作。
  * @property scope 用于执行数据库操作的协程作用域 (通常由 ViewModel 或 Application 提供)。
  */
+
 class InspectionManager(
     private val context: Context,
     private val repository: InspectionRepository,
     private val locationProvider: LocationProvider,
     private val cameraHelper: CameraHelper,
     private val scope: CoroutineScope,
-    private val onImageSaved: (Uri) -> Unit
+    private val onImageSaved: (Uri) -> Unit,
 ) {
 
-    /** 自动拍照的任务 Job，用于在停止巡检时取消监听 */
+    // 2. 实例化 AddressProvider (Day 1 任务产出)
+    private val addressProvider = AddressProvider(context)
     private var autoCaptureJob: Job? = null
 
     /** 上一次拍照时的累计里程 (米) */
@@ -131,17 +135,9 @@ class InspectionManager(
             Log.w(TAG, "Manual capture ignored: No active inspection task.")
             return
         }
-
-        cameraHelper.takePhoto(
-            isAuto = false,
-            onSuccess = { savedUri -> handleImageSaved(savedUri) },
-            onError = { error -> Log.e(TAG, "Manual capture failed: $error") }
-        )
+        // 调用统一的拍照逻辑
+        performCapture(isAuto = false)
     }
-
-    // -------------------------------------------------------------------------
-    // Region: 内部逻辑与辅助方法
-    // -------------------------------------------------------------------------
 
     /**
      * 开启自动定距拍照流。
@@ -155,47 +151,62 @@ class InspectionManager(
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
                     lastCaptureDistance = totalDistance
 
-                    cameraHelper.takePhoto(
-                        isAuto = true,
-                        onSuccess = { savedUri -> handleImageSaved(savedUri) },
-                        onError = { error -> Log.e(TAG, "Auto capture failed: $error") }
-                    )
+                    performCapture(isAuto = true)
+                    }
                 }
             }
         }
-    }
+
 
     /**
-     * 处理相机保存成功后的逻辑。
-     *
-     * **核心职责：**
-     * 更新 UI, 组装 [InspectionRecord] 对象并调用 Repository 写入数据库。
-     *
-     * @param uri 图片在本地的 Uri
+     * 核心拍照逻辑 (融合版)
+     * * 结合了 Dev B 的并发安全逻辑 (位置冻结)
+     * 和 Dev A 的数据存储逻辑 (InspectionRecord)
      */
-    private fun handleImageSaved(uri: Uri) {
-        val taskId = currentTaskId ?: return // 安全检查：如果没有任务ID，说明任务可能已结束，不存
+    private fun performCapture(isAuto: Boolean) {
+        val taskId = currentTaskId ?: return
 
-        // 立即通知 UI 更新图片
-        onImageSaved(uri)
+        // 1. ✨ Dev B 核心逻辑：先冻结位置，防止车速过快导致漂移
+        val frozenLocation = locationProvider.getLocationFlow().value
 
-        val currentLocation = locationProvider.getLocationFlow().value
-
-        val record = InspectionRecord(
-            taskId = taskId,
-            localPath = uri.toString(),
-            captureTime = System.currentTimeMillis(),
-            latitude = currentLocation?.latitude ?: 0.0,
-            longitude = currentLocation?.longitude ?: 0.0,
-            address = currentLocation?.extras?.getString("address")
-        )
-
-        // 存入数据库 (IO 操作由 Repository 内部或 Room 调度，这里只需 launch)
-        scope.launch {
-            repository.saveRecord(record)
-            Log.d(TAG, "Record saved: ${record.localPath}")
-            WorkManagerConfig.scheduleUpload(context)
+        if (frozenLocation == null) {
+            Log.w(TAG, "No location data, skipping capture.")
+            return
         }
+
+    // 2. 执行拍照
+    cameraHelper.takePhoto(
+        isAuto = isAuto,
+        onSuccess = { savedUri ->
+
+            // 3. 切回 IO 线程处理数据 (AddressProvider 是挂起函数)
+            scope.launch(Dispatchers.IO) {
+
+                // ✨ Dev B 核心逻辑：使用冻结的位置去查地址
+                val addressStr = addressProvider.resolveAddress(frozenLocation)
+
+                // ✨ Dev A 核心逻辑：封装成 InspectionRecord 对象
+                val record = InspectionRecord(
+                    taskId = taskId,
+                    localPath = savedUri.toString(),
+                    captureTime = System.currentTimeMillis(),
+                    latitude = frozenLocation.latitude,
+                    longitude = frozenLocation.longitude,
+                    address = addressStr, // 使用查到的地址
+                    syncStatus = 0 // 0 = Pending
+                )
+
+                // 4. 存入数据库
+                repository.saveRecord(record)
+                Log.d(TAG, "Record saved: ${record.localPath}, Addr: $addressStr")
+
+                // 5. 更新 UI
+                onImageSaved(savedUri)
+            }
+        },
+        onError = { error ->
+            Log.e(TAG, "Capture failed: $error")
+        })
     }
 
     private fun startKeepAliveService() {

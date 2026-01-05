@@ -6,6 +6,7 @@ import com.example.roadinspection.data.model.HighFrequencyData
 import com.example.roadinspection.domain.location.GpsSignalProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.network.NetworkStatusProvider
+import com.example.roadinspection.data.repository.InspectionRepository
 import com.google.gson.Gson
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -34,7 +35,8 @@ class DashboardUpdater(
     private val webView: WebView,
     private val locationProvider: LocationProvider,
     private val gpsSignalProvider: GpsSignalProvider,
-    private val networkStatusProvider: NetworkStatusProvider
+    private val networkStatusProvider: NetworkStatusProvider,
+    private val repository: InspectionRepository
 ) {
 
     /**
@@ -75,9 +77,13 @@ class DashboardUpdater(
         // 4. 低频任务：网络状态更新
         startNetworkStatusUpdates()
 
+        // 4. 地址
         locationProvider.startLocationUpdates()
 
         gpsSignalProvider.startGpsSignalUpdates()
+
+        // 5. 待上传图片数量
+        startInspectionCountUpdates()
     }
 
     /**
@@ -183,5 +189,25 @@ class DashboardUpdater(
                     webView.evaluateJavascript(script, null)
                 }
         }
+    }
+
+    private fun startInspectionCountUpdates() {
+        scope.launch {
+            repository.unfinishedCount.collect { count ->
+                updateUploadCount(count)
+                }
+        }
+    }
+
+    private fun updateUploadCount(count: Int) {
+        // 这里的 "updateUploadCount" 是前端网页里定义好的 JS 方法名
+        val jsCode = "javascript:window.updateUploadCount($count)"
+
+        // 必须在主线程更新 UI
+        webView.post {
+            webView.evaluateJavascript(jsCode, null)
+        }
+
+        Log.d("Dashboard", "推送给前端待上传数: $count")
     }
 }

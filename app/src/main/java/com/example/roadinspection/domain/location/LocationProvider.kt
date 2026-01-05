@@ -89,6 +89,8 @@ class LocationProvider(private val context: Context) {
 
         val validSpeed = if (rawLocation.hasSpeed()) rawLocation.speed else -1f
 
+        if (rawLocation.accuracy > 20.0f) return
+
         // 2. 卡尔曼滤波处理 (平滑经纬度，减少 GPS 抖动)
         kalmanFilter.process(
             latMeasurement = rawLocation.latitude,
