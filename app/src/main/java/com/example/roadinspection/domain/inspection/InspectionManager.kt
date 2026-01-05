@@ -2,6 +2,7 @@ package com.example.roadinspection.domain.inspection
 
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.net.Uri
 import android.util.Log
 import com.example.roadinspection.data.repository.InspectionRepository
@@ -132,9 +133,11 @@ class InspectionManager(
             return
         }
 
+        val capturedLocation = locationProvider.getLocationFlow().value
+
         cameraHelper.takePhoto(
             isAuto = false,
-            onSuccess = { savedUri -> handleImageSaved(savedUri) },
+            onSuccess = { savedUri -> handleImageSaved(savedUri, capturedLocation) },
             onError = { error -> Log.e(TAG, "Manual capture failed: $error") }
         )
     }
@@ -155,9 +158,11 @@ class InspectionManager(
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
                     lastCaptureDistance = totalDistance
 
+                    val capturedLocation = locationProvider.getLocationFlow().value
+
                     cameraHelper.takePhoto(
                         isAuto = true,
-                        onSuccess = { savedUri -> handleImageSaved(savedUri) },
+                        onSuccess = { savedUri -> handleImageSaved(savedUri, capturedLocation) },
                         onError = { error -> Log.e(TAG, "Auto capture failed: $error") }
                     )
                 }
@@ -173,21 +178,19 @@ class InspectionManager(
      *
      * @param uri 图片在本地的 Uri
      */
-    private fun handleImageSaved(uri: Uri) {
+    private fun handleImageSaved(uri: Uri, capturedLocation: Location?) {
         val taskId = currentTaskId ?: return // 安全检查：如果没有任务ID，说明任务可能已结束，不存
 
         // 立即通知 UI 更新图片
         onImageSaved(uri)
 
-        val currentLocation = locationProvider.getLocationFlow().value
-
         val record = InspectionRecord(
             taskId = taskId,
             localPath = uri.toString(),
             captureTime = System.currentTimeMillis(),
-            latitude = currentLocation?.latitude ?: 0.0,
-            longitude = currentLocation?.longitude ?: 0.0,
-            address = currentLocation?.extras?.getString("address")
+            latitude = capturedLocation?.latitude ?: 0.0,
+            longitude = capturedLocation?.longitude ?: 0.0,
+            address = capturedLocation?.extras?.getString("address")
         )
 
         // 存入数据库 (IO 操作由 Repository 内部或 Room 调度，这里只需 launch)
