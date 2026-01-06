@@ -5,6 +5,7 @@ import android.webkit.JavascriptInterface
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import com.example.roadinspection.domain.inspection.InspectionManager
+import kotlinx.coroutines.flow.flow
 
 /**
  * WebAppInterface 接口的具体实现类 (Class)。
@@ -31,7 +32,8 @@ class AndroidNativeApiImpl(
 
     @JavascriptInterface
     override fun manualCapture() {
-        inspectionManager.manualCapture()
+        val result = inspectionManager.manualCapture()
+        if (result == false) showToast("当前无巡检任务，拍照失败")
     }
 
     @JavascriptInterface

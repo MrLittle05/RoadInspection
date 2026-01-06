@@ -172,13 +172,14 @@ class InspectionManager(
      * 即使在自动巡检过程中，用户也可以手动触发拍照记录特殊病害。
      * 该操作不会干扰自动拍照和 IRI 计算的计数器。
      */
-    fun manualCapture() {
+    fun manualCapture() : Boolean {
         if (currentTaskId == null) {
             Log.w(TAG, "⚠️ 手动拍照请求被忽略: 当前无进行中的任务")
-            return
+            return false
         }
         Log.i(TAG, "📸 触发手动拍照")
         performCapture(isAuto = false)
+        return true
     }
 
     // -------------------------------------------------------------------------
