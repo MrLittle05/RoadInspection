@@ -13,7 +13,8 @@ import com.example.roadinspection.domain.inspection.InspectionManager
 class AndroidNativeApiImpl(
     private val inspectionManager: InspectionManager,
     private val context: Context,
-    private val selectImageLauncher: ActivityResultLauncher<String>
+    private val selectImageLauncher: ActivityResultLauncher<String>,
+    private val onSetZoom: (Float) -> Unit
 ) : AndroidNativeApi {
 
     @JavascriptInterface
@@ -48,6 +49,11 @@ class AndroidNativeApiImpl(
                 showToast("未知的相册类型: $type")
             }
         }
+    }
+
+    @JavascriptInterface
+    override fun setZoom(value: Float) {
+        onSetZoom(value)
     }
 
     @JavascriptInterface

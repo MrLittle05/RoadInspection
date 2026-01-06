@@ -22,5 +22,8 @@ interface AndroidNativeApi {
     fun openGallery(type: String)
 
     @JavascriptInterface
+    fun setZoom(value: Float)
+
+    @JavascriptInterface
     fun showToast(msg: String)
 }

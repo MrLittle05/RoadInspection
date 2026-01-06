@@ -89,8 +89,7 @@ const UI = {
       .forEach((b) => b.classList.remove("active"));
     const targetId = val === 1 ? "btn-zoom-1" : "btn-zoom-05";
     document.getElementById(targetId).classList.add("active");
-    window.AndroidNative.showToast("缩放: " + val + "x");
-    // 实际项目中这里应调用 Native 接口设置相机变焦
+    window.AndroidNative.setZoom(val);
   },
 
   switchMode: (mode) => {
