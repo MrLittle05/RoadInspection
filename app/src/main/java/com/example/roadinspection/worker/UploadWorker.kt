@@ -42,7 +42,7 @@ class UploadWorker(
             // ==============================================================
             // STEP 1: 同步新建的任务 (Create Task)
             // ==============================================================
-            val unsyncedTasks = repository.getUnsyncedTasks() //
+            val unsyncedTasks = repository.getUnsyncedTasks()
             for (task in unsyncedTasks) {
                 Log.d(TAG, "同步新任务: ${task.title} (${task.taskId})")
 
@@ -126,7 +126,7 @@ class UploadWorker(
                         val res = api.submitRecord(req)
                         if (res.isSuccess) {
                             // 最终完成：State -> 2 (SYNCED)
-                            repository.updateRecord(currentRecord.copy(syncStatus = 2)) //
+                            repository.updateRecord(currentRecord.copy(syncStatus = 2))
                         } else {
                             Log.w(TAG, "元数据提交失败: ${res.message}")
                         }
@@ -137,7 +137,7 @@ class UploadWorker(
             // ==============================================================
             // STEP 3: 同步任务结束状态 (Task Finish)
             // ==============================================================
-            val tasksToFinish = repository.getFinishedButNotSyncedTasks() //
+            val tasksToFinish = repository.getFinishedButNotSyncedTasks()
             for (task in tasksToFinish) {
                 if (task.endTime != null) {
                     Log.d(TAG, "同步任务结束状态: ${task.taskId}")
