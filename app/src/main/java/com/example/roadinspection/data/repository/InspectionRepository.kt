@@ -6,6 +6,7 @@ import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.data.source.local.InspectionTask
 import kotlinx.coroutines.flow.Flow
+import java.io.File
 
 /**
  * 巡检数据仓库 (Repository)。
@@ -139,4 +140,70 @@ class InspectionRepository(private val dao: InspectionDao) {
      * 用于 UI 显示红色角标或进度提示 (例如 "待上传: 5")。
      */
     val unfinishedCount: Flow<Int> = dao.getUnfinishedCount()
+
+    /**
+     * 执行本地存储清理策略：保留数据库记录，仅删除物理图片文件。
+     *
+     * **核心逻辑：**
+     * 1. 识别并解析 file:// 格式的 URI，确保 File 对象能定位到物理文件。
+     * 2. 执行删除操作。
+     * 3. **关键修正**：仅在文件被成功删除或文件本来就不存在时，才标记数据库为已清理。
+     *
+     * @param retentionDays 本地图片保留天数。
+     * @return 成功删除的物理文件数量。
+     */
+    suspend fun clearExpiredFiles(retentionDays: Int): Int {
+        val threshold = System.currentTimeMillis() - (retentionDays * 24 * 60 * 60 * 1000L)
+
+        // 获取需要清理图片文件的记录
+        val records = dao.getRecordsToClean(threshold)
+        if (records.isEmpty()) return 0
+
+        val cleanedIds = mutableListOf<Long>()
+        var deletedCount = 0
+
+        records.forEach { record ->
+            try {
+                var isPhysicallyDeleted = false
+
+                // 1. 解析 URI (修复 file:// 前缀导致 exists() 判错的问题)
+                val uri = android.net.Uri.parse(record.localPath)
+                val filePath = uri.path // 提取纯路径，如 /storage/emulated/0/...
+
+                if (filePath != null) {
+                    val file = File(filePath)
+                    if (file.exists()) {
+                        // 2. 尝试删除
+                        if (file.delete()) {
+                            deletedCount++
+                            isPhysicallyDeleted = true
+                        } else {
+                            // 删除失败（如权限问题），此时绝对不能更新数据库！
+                            // 留待下次任务重试，或者记录日志排查
+                            android.util.Log.w("InspectionRepo", "无法删除文件: $filePath")
+                            isPhysicallyDeleted = false
+                        }
+                    } else {
+                        // 文件本来就不存在（可能用户手动删了），视为清理成功
+                        isPhysicallyDeleted = true
+                    }
+                }
+
+                // 3. 只有确认物理文件已消失，才更新数据库
+                if (isPhysicallyDeleted) {
+                    cleanedIds.add(record.id)
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 4. 批量更新数据库状态
+        if (cleanedIds.isNotEmpty()) {
+            dao.clearLocalPaths(cleanedIds)
+        }
+
+        return deletedCount
+    }
 }

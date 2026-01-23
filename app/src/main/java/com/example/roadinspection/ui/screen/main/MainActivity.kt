@@ -102,6 +102,9 @@ class MainActivity : ComponentActivity() {
         // 4. 调度未完成任务上传
         WorkManagerConfig.scheduleUpload(applicationContext)
 
+        // 5. 调度每日清理任务
+        WorkManagerConfig.scheduleDailyCleanup(applicationContext)
+
         setContent {
             GreetingCardTheme {
                 val imageCapture = remember { ImageCapture.Builder().build() }

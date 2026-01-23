@@ -3,11 +3,13 @@ package com.example.roadinspection.worker
 import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
+import androidx.work.PeriodicWorkRequestBuilder
 
 object WorkManagerConfig {
 
@@ -42,6 +44,28 @@ object WorkManagerConfig {
             WORK_NAME,
             ExistingWorkPolicy.KEEP,
             uploadRequest
+        )
+    }
+
+
+    /**
+     * 调度每日清理任务
+     * 建议在 MainActivity 的 onCreate 或 Application 初始化中调用一次
+     */
+    fun scheduleDailyCleanup(context: Context) {
+        val cleanupRequest = PeriodicWorkRequestBuilder<CleanupWorker>(24, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiresBatteryNotLow(true)
+                    .setRequiresStorageNotLow(true)
+                    .build()
+            )
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "DailyCleanup",
+            ExistingPeriodicWorkPolicy.KEEP, // 如果已存在任务，则不重复添加
+            cleanupRequest
         )
     }
 }
