@@ -36,6 +36,10 @@ app.use(async (ctx, next) => {
     await next(); // 放行请求进入下游路由
     const ms = Date.now() - start;
 
+    if (ctx.body && ctx.body.code && !ctx.headerSent) {
+      ctx.status = ctx.body.code;
+    }
+
     // [INFO] 格式：[METHOD] URL - STATUS - TIME
     // 示例：[POST] /api/record/submit - 200 - 45ms
     console.log(`[${ctx.method}] ${ctx.url} - ${ctx.status} - ${ms}ms`);
@@ -48,8 +52,75 @@ app.use(async (ctx, next) => {
     );
     console.error("❌ 全局错误捕获:", err);
 
-    // 继续向上抛出，确保 Koa 能返回 500 响应给客户端
-    throw err;
+    ctx.status = err.status || 500;
+    ctx.body = {
+      code: ctx.status,
+      message: err.message || "Internal Server Error",
+    };
+  }
+});
+
+app.use(bodyParser()); // 解析 JSON Body
+
+/**
+ * 全局身份鉴权中间件
+ * @description
+ * 拦截除“白名单”外的所有请求，校验 JWT Token 有效性。
+ * 校验通过会将用户信息挂载到 ctx.state.user，供下游路由使用。
+ */
+app.use(async (ctx, next) => {
+  // ----------------------------------------------------------
+  // TODO: [配置] 后续请将密钥移入 config.js 文件，并使用更复杂的随机字符串
+  // ----------------------------------------------------------
+  const JWT_SECRET = "temporary_secret_key_change_me_later";
+
+  // 1. 定义白名单
+  const whiteList = ["/api/auth/login", "/api/auth/register", "/favicon.ico"];
+
+  // 如果请求路径在白名单中，直接放行
+  if (whiteList.includes(ctx.path)) {
+    return await next();
+  }
+
+  // 2. 获取 Authorization Header
+  // 约定前端 Header 格式为: "Authorization: Bearer <token_string>"
+  const authHeader = ctx.header.authorization;
+
+  // if (!authHeader) {
+  //   console.warn(`⛔ [Auth] 拦截未授权访问: ${ctx.path}`);
+  //   ctx.status = 401;
+  //   ctx.body = { code: 401, message: "未登录或 Token 缺失" };
+  //   return;
+  // }
+
+  // 3. 提取并验证 Token
+  try {
+    // split(' ')[1] 是为了去掉前缀 "Bearer "
+    // const token = authHeader.split(" ")[1];
+
+    // if (!token) {
+    //   throw new Error("Token 格式错误");
+    // }
+
+    // 验证 Token (如果过期或被篡改，verify 会抛出异常)
+    // const decoded = jwt.verify(token, JWT_SECRET);
+
+    // 4. 挂载用户信息
+    // 成功后，后续路由可以通过 ctx.state.user 获取当前用户 ID 和 Role
+    // ctx.state.user = decoded;
+
+    // TODO: [可选] 这里可以添加检查用户是否被封禁的逻辑 (需查库，会有性能损耗)
+
+    await next(); // 验证通过，放行
+  } catch (err) {
+    // 区分 Token 过期还是 Token 无效
+    const isExpired = err.name === "TokenExpiredError";
+    const msg = isExpired ? "登录已过期，请重新登录" : "Token 无效或非法";
+
+    console.warn(`⛔ [Auth] 鉴权失败 (${err.name}): ${ctx.path}`);
+
+    ctx.status = 401;
+    ctx.body = { code: 401, message: msg };
   }
 });
 
@@ -113,6 +184,7 @@ router.post("/api/auth/register", async (ctx) => {
     const existingUser = await User.findOne({ username });
     if (existingUser) {
       console.warn(`⚠️ [Auth Register] 用户名已存在: ${username}`);
+      ctx.status = 409;
       ctx.body = { code: 409, message: "用户名已被占用" }; // 409 Conflict
       return;
     }
@@ -175,6 +247,7 @@ router.post("/api/auth/login", async (ctx) => {
     // 2. 账号不存在校验
     if (!user) {
       console.warn(`⚠️ [Auth Login] 用户不存在: ${username}`);
+      ctx.status = 401;
       ctx.body = { code: 401, message: "用户名或密码错误" };
       return;
     }
@@ -182,6 +255,7 @@ router.post("/api/auth/login", async (ctx) => {
     // 3. 软删除校验 (离职员工禁止登录)
     if (user.deletedAt) {
       console.warn(`⛔ [Auth Login] 已离职用户尝试登录: ${username}`);
+      ctx.status = 403;
       ctx.body = { code: 403, message: "账号已停用" };
       return;
     }
@@ -190,6 +264,7 @@ router.post("/api/auth/login", async (ctx) => {
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) {
       console.warn(`⚠️ [Auth Login] 密码错误: ${username}`);
+      ctx.status = 401;
       ctx.body = { code: 401, message: "用户名或密码错误" };
       return;
     }
@@ -280,6 +355,7 @@ router.post("/api/task/create", async (ctx) => {
     ctx.body = { code: 200, message: "任务创建成功" };
   } catch (e) {
     console.error(`❌ [Task Create] 失败 (ID: ${taskId}):`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "任务创建失败" };
   }
 });
@@ -331,6 +407,7 @@ router.post("/api/record/submit", async (ctx) => {
     ctx.body = { code: 200, message: "记录保存成功" };
   } catch (e) {
     console.error(`❌ [Record] 保存失败:`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "记录保存失败" };
   }
 });
@@ -365,6 +442,7 @@ router.post("/api/task/finish", async (ctx) => {
     }
   } catch (e) {
     console.error(`❌ [Task Finish] 失败:`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "同步任务结束失败" };
   }
 });
@@ -421,7 +499,6 @@ router.get("/api/record/list", async (ctx) => {
 // ============================================================
 
 // 挂载中间件
-app.use(bodyParser()); // 解析 JSON Body
 app.use(router.routes()).use(router.allowedMethods());
 
 // 导出 app 实例供测试使用
