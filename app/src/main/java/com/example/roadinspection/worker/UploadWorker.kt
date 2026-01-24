@@ -116,6 +116,7 @@ class UploadWorker(
 
                         val res = api.submitRecord(req)
                         if (res.isSuccess) {
+                            // 最终完成：State -> 2 (SYNCED)
                             repository.updateRecord(currentRecord.copy(syncStatus = 2))
                         } else {
                             Log.w(TAG, "元数据提交失败: ${res.message}")

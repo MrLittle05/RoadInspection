@@ -9,12 +9,13 @@
  * 3. 业务接口路由分发 (Routes)
  */
 
+import bcrypt from "bcryptjs";
 import Koa from "koa";
 import bodyParser from "koa-bodyparser";
 import Router from "koa-router";
 import { connect } from "mongoose";
 import { mongoUrl } from "./config/config.js";
-import { Record, Task } from "./model/models.js";
+import { Record, Task, User } from "./model/models.js";
 import { getStsToken } from "./utils/oss_helper.js";
 
 const app = new Koa();
@@ -35,6 +36,10 @@ app.use(async (ctx, next) => {
     await next(); // 放行请求进入下游路由
     const ms = Date.now() - start;
 
+    if (ctx.body && ctx.body.code && !ctx.headerSent) {
+      ctx.status = ctx.body.code;
+    }
+
     // [INFO] 格式：[METHOD] URL - STATUS - TIME
     // 示例：[POST] /api/record/submit - 200 - 45ms
     console.log(`[${ctx.method}] ${ctx.url} - ${ctx.status} - ${ms}ms`);
@@ -43,12 +48,79 @@ app.use(async (ctx, next) => {
 
     // [ERROR] 捕获所有未被下游 try-catch 处理的异常
     console.error(
-      `[${ctx.method}] ${ctx.url} - ${err.status || 500} - ${ms}ms`
+      `[${ctx.method}] ${ctx.url} - ${err.status || 500} - ${ms}ms`,
     );
     console.error("❌ 全局错误捕获:", err);
 
-    // 继续向上抛出，确保 Koa 能返回 500 响应给客户端
-    throw err;
+    ctx.status = err.status || 500;
+    ctx.body = {
+      code: ctx.status,
+      message: err.message || "Internal Server Error",
+    };
+  }
+});
+
+app.use(bodyParser()); // 解析 JSON Body
+
+/**
+ * 全局身份鉴权中间件
+ * @description
+ * 拦截除“白名单”外的所有请求，校验 JWT Token 有效性。
+ * 校验通过会将用户信息挂载到 ctx.state.user，供下游路由使用。
+ */
+app.use(async (ctx, next) => {
+  // ----------------------------------------------------------
+  // TODO: [配置] 后续请将密钥移入 config.js 文件，并使用更复杂的随机字符串
+  // ----------------------------------------------------------
+  const JWT_SECRET = "temporary_secret_key_change_me_later";
+
+  // 1. 定义白名单
+  const whiteList = ["/api/auth/login", "/api/auth/register", "/favicon.ico"];
+
+  // 如果请求路径在白名单中，直接放行
+  if (whiteList.includes(ctx.path)) {
+    return await next();
+  }
+
+  // 2. 获取 Authorization Header
+  // 约定前端 Header 格式为: "Authorization: Bearer <token_string>"
+  const authHeader = ctx.header.authorization;
+
+  // if (!authHeader) {
+  //   console.warn(`⛔ [Auth] 拦截未授权访问: ${ctx.path}`);
+  //   ctx.status = 401;
+  //   ctx.body = { code: 401, message: "未登录或 Token 缺失" };
+  //   return;
+  // }
+
+  // 3. 提取并验证 Token
+  try {
+    // split(' ')[1] 是为了去掉前缀 "Bearer "
+    // const token = authHeader.split(" ")[1];
+
+    // if (!token) {
+    //   throw new Error("Token 格式错误");
+    // }
+
+    // 验证 Token (如果过期或被篡改，verify 会抛出异常)
+    // const decoded = jwt.verify(token, JWT_SECRET);
+
+    // 4. 挂载用户信息
+    // 成功后，后续路由可以通过 ctx.state.user 获取当前用户 ID 和 Role
+    // ctx.state.user = decoded;
+
+    // TODO: [可选] 这里可以添加检查用户是否被封禁的逻辑 (需查库，会有性能损耗)
+
+    await next(); // 验证通过，放行
+  } catch (err) {
+    // 区分 Token 过期还是 Token 无效
+    const isExpired = err.name === "TokenExpiredError";
+    const msg = isExpired ? "登录已过期，请重新登录" : "Token 无效或非法";
+
+    console.warn(`⛔ [Auth] 鉴权失败 (${err.name}): ${ctx.path}`);
+
+    ctx.status = 401;
+    ctx.body = { code: 401, message: msg };
   }
 });
 
@@ -82,6 +154,141 @@ connect(mongoUrl, {
 // ============================================================
 // 3. API Routes (业务路由)
 // ============================================================
+
+// ============================================================
+// Auth Routes (用户认证)
+// ============================================================
+
+/**
+ * @route POST /api/auth/register
+ * @summary 用户注册
+ * @description
+ * 1. 校验用户名是否已存在
+ * 2. 对密码进行 BCrypt 哈希加密
+ * 3. 创建用户文档
+ */
+router.post("/api/auth/register", async (ctx) => {
+  const { username, password, role } = ctx.request.body;
+
+  // 1. 基础参数校验
+  if (!username || !password) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "用户名和密码不能为空" };
+    return;
+  }
+
+  console.log(`👤 [Auth Register] 收到注册请求: ${username}`);
+
+  try {
+    // 2. 检查用户名是否已存在
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
+      console.warn(`⚠️ [Auth Register] 用户名已存在: ${username}`);
+      ctx.status = 409;
+      ctx.body = { code: 409, message: "用户名已被占用" }; // 409 Conflict
+      return;
+    }
+
+    // 3. 密码加密 (Salt Rounds = 10)
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // 4. 创建用户
+    const newUser = new User({
+      username,
+      hashedPassword,
+      role: role || "inspector", // 默认为巡检员
+    });
+
+    await newUser.save();
+
+    console.log(`✅ [Auth Register] 用户注册成功: ${newUser.id}`);
+
+    ctx.body = {
+      code: 200,
+      message: "注册成功",
+      // 返回基本信息，注意：User 模型配置了 transform，会自动包含 id，隐藏 _id
+      data: {
+        id: newUser.id,
+        username: newUser.username,
+        role: newUser.role,
+      },
+    };
+  } catch (e) {
+    console.error(`❌ [Auth Register] 注册失败:`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "注册失败，服务器内部错误" };
+  }
+});
+
+/**
+ * @route POST /api/auth/login
+ * @summary 用户登录
+ * @description
+ * 验证用户名密码，返回用户 ID 给移动端暂存。
+ * 后续移动端在上传 Task 时，需将此 ID 填入 inspectorId 字段。
+ */
+router.post("/api/auth/login", async (ctx) => {
+  const { username, password } = ctx.request.body;
+
+  if (!username || !password) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "请输入用户名和密码" };
+    return;
+  }
+
+  console.log(`🔐 [Auth Login] 尝试登录: ${username}`);
+
+  try {
+    // 1. 查找用户
+    //  .select('+hashedPassword') 才能将user的hashedPassward取出。
+    const user = await User.findOne({ username }).select("+hashedPassword");
+
+    // 2. 账号不存在校验
+    if (!user) {
+      console.warn(`⚠️ [Auth Login] 用户不存在: ${username}`);
+      ctx.status = 401;
+      ctx.body = { code: 401, message: "用户名或密码错误" };
+      return;
+    }
+
+    // 3. 软删除校验 (离职员工禁止登录)
+    if (user.deletedAt) {
+      console.warn(`⛔ [Auth Login] 已离职用户尝试登录: ${username}`);
+      ctx.status = 403;
+      ctx.body = { code: 403, message: "账号已停用" };
+      return;
+    }
+
+    // 4. 密码比对
+    const isMatch = await bcrypt.compare(password, user.hashedPassword);
+    if (!isMatch) {
+      console.warn(`⚠️ [Auth Login] 密码错误: ${username}`);
+      ctx.status = 401;
+      ctx.body = { code: 401, message: "用户名或密码错误" };
+      return;
+    }
+
+    console.log(`✅ [Auth Login] 登录成功: ${user.id} (${user.role})`);
+
+    // 5. 返回结果
+    // 目前阶段：直接返回 User ID 给安卓端保存
+    // 未来阶段：这里会改为生成 JWT Token 返回
+    ctx.body = {
+      code: 200,
+      message: "登录成功",
+      data: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+    };
+  } catch (e) {
+    console.error(`❌ [Auth Login] 登录异常:`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "登录服务异常" };
+  }
+});
 
 /**
  * @route GET /api/oss/sts
@@ -120,7 +327,7 @@ router.post("/api/task/create", async (ctx) => {
 
   // 关键业务日志：记录核心 ID，方便日后排查 "某人说他建了任务但库里没有" 的扯皮问题
   console.log(
-    `📋 [Task Create] 收到请求: User=${inspectorId}, Task=${taskId}, Title=${title}`
+    `📋 [Task Create] 收到请求: User=${inspectorId}, Task=${taskId}, Title=${title}`,
   );
 
   const isFinished = !!endTime;
@@ -141,13 +348,14 @@ router.post("/api/task/create", async (ctx) => {
         },
       },
       // 如果任务不存在则插入，存在则忽略($setOnInsert不生效)
-      { upsert: true }
+      { upsert: true },
     );
 
     console.log(`✅ [Task Create] 任务入库成功: ${taskId}`);
     ctx.body = { code: 200, message: "任务创建成功" };
   } catch (e) {
     console.error(`❌ [Task Create] 失败 (ID: ${taskId}):`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "任务创建失败" };
   }
 });
@@ -168,7 +376,7 @@ router.post("/api/record/submit", async (ctx) => {
   // 日志作用：排查 "位置漂移" 问题。
   // 如果用户投诉定位不准，可对比此处日志中的 Loc 与用户实际位置。
   console.log(
-    `📷 [Record] 收到图片: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}]`
+    `📷 [Record] 收到图片: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}]`,
   );
 
   // Data Transformation (数据清洗与适配)
@@ -199,6 +407,7 @@ router.post("/api/record/submit", async (ctx) => {
     ctx.body = { code: 200, message: "记录保存成功" };
   } catch (e) {
     console.error(`❌ [Record] 保存失败:`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "记录保存失败" };
   }
 });
@@ -217,13 +426,13 @@ router.post("/api/task/finish", async (ctx) => {
     // 🟢 BUG FIX: 之前代码未将 updateOne 结果赋值给 res，导致 res.matchedCount 报错
     const res = await Task.updateOne(
       { taskId: taskId },
-      { $set: { endTime: endTime, isFinished: true } }
+      { $set: { endTime: endTime, isFinished: true } },
     );
 
     // 业务逻辑检查：确保要结束的任务确实存在
     if (res.matchedCount === 0) {
       console.warn(
-        `⚠️ [Task Finish] 警告: 未找到任务 ID ${taskId}，可能是非法请求`
+        `⚠️ [Task Finish] 警告: 未找到任务 ID ${taskId}，可能是非法请求`,
       );
       // 这里的 200 是为了兼容性，也可以考虑返回 404
       ctx.body = { code: 200, message: "任务可能已删除或不存在" };
@@ -233,7 +442,55 @@ router.post("/api/task/finish", async (ctx) => {
     }
   } catch (e) {
     console.error(`❌ [Task Finish] 失败:`, e);
+    ctx.status = 500;
     ctx.body = { code: 500, message: "同步任务结束失败" };
+  }
+});
+
+/**
+ * @route GET /api/record/list
+ * @summary 前端获取指定任务下的所有病害记录
+ * @description
+ * 根据 taskId 拉取该任务关联的所有 Record 数据。
+ * 通常用于 "任务详情页" 或 "历史记录回放" 功能。
+ *
+ * @param {string} taskId - 任务 ID (通过 Query Param 传递, e.g., ?taskId=xxx)
+ */
+router.get("/api/record/list", async (ctx) => {
+  // 1. 从 URL 查询参数中获取 taskId (GET 请求不读取 body)
+  const { taskId } = ctx.query;
+
+  // 2. 参数校验
+  if (!taskId) {
+    console.warn(`⚠️ [Record List] 请求缺失 taskId`);
+    ctx.status = 400; // Bad Request
+    ctx.body = { code: 400, message: "参数 taskId 不能为空" };
+    return;
+  }
+
+  console.log(`🔍 [Record List] 正在查询任务记录: ${taskId}`);
+
+  try {
+    // 3. 数据库查询
+    // find: 查找所有匹配文档
+    // sort: 按拍摄时间 (captureTime) 正序排列，方便前端按时间轴展示
+    const records = await Record.find({ taskId: taskId }).sort({
+      captureTime: 1,
+    });
+
+    // 4. 组装响应
+    const count = records.length;
+    console.log(`✅ [Record List] 查询成功: 找到 ${count} 条记录`);
+
+    ctx.body = {
+      code: 200,
+      data: records,
+      message: "获取成功",
+    };
+  } catch (e) {
+    console.error(`❌ [Record List] 查询出错 (ID: ${taskId}):`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "获取记录失败，请稍后重试" };
   }
 });
 
@@ -242,12 +499,16 @@ router.post("/api/task/finish", async (ctx) => {
 // ============================================================
 
 // 挂载中间件
-app.use(bodyParser()); // 解析 JSON Body
 app.use(router.routes()).use(router.allowedMethods());
 
-const PORT = process.env.PORT;
-app.listen(PORT, () => {
-  console.log(`
+// 导出 app 实例供测试使用
+export { app };
+
+// 只有当文件直接被运行时，才启动服务器
+if (process.env.NODE_ENV !== "test") {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`
 🚀 Road Inspection Server Running...
 -----------------------------------
 📡 Local:   http://localhost:${PORT}
@@ -255,4 +516,5 @@ app.listen(PORT, () => {
 ☁️ Cloud:   Aliyun OSS (Shanghai)
 -----------------------------------
   `);
-});
+  });
+}

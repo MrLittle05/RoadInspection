@@ -160,4 +160,38 @@ interface InspectionDao {
      */
     @Query("DELETE FROM inspection_tasks WHERE task_id = :taskId")
     suspend fun deleteTask(taskId: String)
+
+    /**
+     * 获取待清理本地文件的候选记录列表。
+     *
+     * **筛选条件 (必须同时满足)：**
+     * 1. `sync_status = 2`: 必须是已完全同步到服务端的记录，防止误删未上传图片。
+     * 2. `local_path != ''`: 仅筛选那些本地路径尚未被置空的记录。
+     * 3. `capture_time < :expirationThreshold`: 拍摄时间早于过期阈值。
+     *
+     * @param expirationThreshold 过期时间戳 (截止时间点)。
+     * @return 符合清理条件的 [InspectionRecord] 列表。
+     */
+    @Query("""
+        SELECT * FROM inspection_records 
+        WHERE sync_status = 2 
+        AND local_path != '' 
+        AND capture_time < :expirationThreshold
+    """)
+    suspend fun getRecordsToClean(expirationThreshold: Long): List<InspectionRecord>
+
+    /**
+     * 批量清除本地文件路径标记。
+     *
+     * **操作效果：**
+     * 将指定记录的 `local_path` 字段更新为空字符串 `""`。
+     *
+     * **业务影响：**
+     * 这不会删除数据库行记录。UI 层检测到 `localPath` 为空时，
+     * 应降级使用 `serverUrl` 显示图片或显示“云端存储”标识。
+     *
+     * @param ids 需要标记为“已清理”的记录主键 (id) 列表。
+     */
+    @Query("UPDATE inspection_records SET local_path = '' WHERE id IN (:ids)")
+    suspend fun clearLocalPaths(ids: List<Long>)
 }

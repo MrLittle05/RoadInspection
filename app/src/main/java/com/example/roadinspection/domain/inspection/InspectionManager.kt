@@ -10,6 +10,7 @@ import com.example.roadinspection.domain.address.AddressProvider
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.iri.IriCalculator
 import com.example.roadinspection.service.KeepAliveService
+import com.example.roadinspection.worker.WorkManagerConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -159,8 +160,12 @@ class InspectionManager(
         // 4. 数据库状态更新
         scope.launch {
             currentTaskId?.let { taskId ->
+                // A. 更新本地数据库，写入 endTime 并标记 isFinished = true
                 repository.finishTask(taskId)
                 Log.i(TAG, "✅ 任务结单完成 TaskId: $taskId")
+
+                // B. 关键点：立即触发一次 WorkManager 同步
+                WorkManagerConfig.scheduleUpload(context)
             }
             currentTaskId = null
         }
@@ -304,7 +309,9 @@ class InspectionManager(
                     )
 
                     repository.saveRecord(record)
-                    Log.i(TAG, "💾 记录已写入数据库 [${record.id}] (离线模式: ${addressStr.isEmpty()})")
+                    Log.i(TAG, "💾 记录已写入数据库 [${record}]")
+
+                    WorkManagerConfig.scheduleUpload(context)
 
                     // 3. 通知 UI
                     onImageSaved(savedUri)

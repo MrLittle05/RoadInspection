@@ -1,68 +1,134 @@
 /**
  * @module models
  * @description 定义 MongoDB 数据模型 (Mongoose Schemas)
+ * 包含: User(用户), Task(巡检任务), Record(病害记录)
  */
 
 import { Schema, model } from "mongoose";
 
 // ============================================================
-// 1. 任务模型 (Task)
+// 1. 用户模型 (User)
+// ============================================================
+/**
+ * 用户/巡检员 Schema
+ * 包含认证信息、角色权限及软删除机制
+ */
+const userSchema = new Schema(
+  {
+    // 注意：MongoDB 自动生成 _id (ObjectId)
+
+    // 用户名 (用于登录，唯一)
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true, // 自动去除首尾空格
+    },
+
+    // 密码哈希值 (严禁存明文)
+    // select: false 意味着默认查询 (User.find) 不会返回此字段，保障安全
+    hashedPassword: {
+      type: String,
+      required: true,
+      select: false,
+    },
+
+    // 用户角色
+    role: {
+      type: String,
+      enum: ["admin", "inspector"],
+      default: "inspector",
+    },
+
+    // 软删除字段
+    // null = 有效用户; 有日期 = 已删除用户
+    deletedAt: { type: Date, default: null },
+  },
+  {
+    // 自动管理 createdAt 和 updatedAt 字段
+    timestamps: true,
+    // 允许虚拟字段 (virtuals) 包含在 JSON 输出中
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
+);
+
+// 虚拟字段: 将 _id 映射为 id
+// 前端拿到的数据里会有 "id": "507f1f..." 方便使用
+userSchema.virtual("id").get(function () {
+  return this._id.toHexString();
+});
+
+// 索引优化: 经常需要查询 "未被删除的用户" 或 "按用户名查找"
+userSchema.index({ deletedAt: 1 });
+userSchema.index({ username: 1 });
+
+// ============================================================
+// 2. 任务模型 (Task)
 // ============================================================
 /**
  * 巡检任务 Schema
- * 记录一次完整的巡检活动，包含开始/结束状态
+ * 业务主键是 Android 生成的 UUID
  */
 const taskSchema = new Schema({
-  // 业务主键：由 Android 端生成的 UUID，用于唯一标识任务
+  // 业务主键：由 Android 端生成的 UUID
   taskId: { type: String, required: true, unique: true, index: true },
 
-  title: String, // 任务标题/描述
-  inspectorId: String, // 巡检员 ID (可以是工号或用户名)
-  startTime: Number, // 开始时间戳 (Unix Timestamp)
-  endTime: Number, // 结束时间戳
+  title: { type: String, required: true },
 
-  // 任务状态标记：false=进行中, true=已完成
+  // 关联字段: 存储 User 表的 _id
+  // ref: 'User' 允许使用 .populate('inspectorId') 联表查询
+  inspectorId: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+    index: true,
+  },
+
+  startTime: { type: Number, required: true }, // Unix Timestamp
+  endTime: Number,
+
+  // 任务状态: false=进行中, true=已完成
   isFinished: { type: Boolean, default: false },
 
-  // 数据库元数据：记录记录插入服务器的时间
+  // 记录插入时间
   createdAt: { type: Date, default: Date.now },
 });
 
 // ============================================================
-// 2. 记录模型 (Record)
+// 3. 记录模型 (Record)
 // ============================================================
 /**
  * 巡检记录 Schema
- * 对应每一个具体的病害点，包含照片 URL 和地理位置
+ * 对应具体的病害点，包含地理位置
  */
 const recordSchema = new Schema({
-  // 外键关联：指向所属的 Task
+  // 外键关联：指向所属的 Task (注意这里是 taskId 字符串，不是 _id)
   taskId: { type: String, required: true, index: true },
 
-  serverUrl: String, // OSS 图片地址
-  captureTime: Number, // 拍摄时间戳
-  address: String, // 逆地理编码后的地址描述 (如：上海市xx路)
+  serverUrl: { type: String, required: true }, // 图片在阿里云OSS的地址
+  captureTime: { type: Number, required: true },
+  address: String,
 
-  /**
-   * 核心地理位置字段 (GeoJSON 标准格式)
-   * 用于支持 MongoDB 的空间查询 (如 $near, $geoWithin)
-   * @warning 注意 coordinates 顺序是 [经度, 纬度]，与 Google Maps/高德 API 常用的 (lat, lng) 相反！
-   */
+  // GeoJSON 地理位置
   location: {
     type: { type: String, enum: ["Point"], default: "Point" },
     coordinates: { type: [Number], required: true }, // [Lng, Lat]
   },
 
-  // 保留原始经纬度字段，作为备份数据便于查错
-  rawLat: Number,
-  rawLng: Number,
+  // 原始经纬度备份
+  rawLat: { type: Number, required: true },
+  rawLng: { type: Number, required: true },
 });
 
-// 创建 2dsphere 空间索引
-// 作用：开启地理空间查询能力，例如 "查找附近 5km 内的所有病害"
+// 创建 2dsphere 空间索引 (支持 $near, $geoWithin 查询)
 recordSchema.index({ location: "2dsphere" });
 
+// ============================================================
+// 导出模型
+// ============================================================
+const User = model("User", userSchema);
 const Task = model("Task", taskSchema);
 const Record = model("Record", recordSchema);
 
-export { Task, Record };
+export { Record, Task, User };
