@@ -281,10 +281,18 @@ class InspectionManager(
             onSuccess = { savedUri ->
                 // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
                 scope.launch(Dispatchers.IO) {
-                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在解析地址...")
+                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在处理数据...")
 
-                    val addressStr = addressProvider.resolveAddress(capturedLocation)
-                    Log.d(TAG, "📍 地址解析完成: $addressStr")
+                    // ✨ 修改点：增加容错处理，允许离线保存
+                    var addressStr = "" // 默认为空，或者 "待识别"
+                    try {
+                        // 尝试联网解析地址
+                        addressStr = addressProvider.resolveAddress(capturedLocation)
+                        Log.d(TAG, "📍 地址解析成功: $addressStr")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ 离线模式或网络超时: 暂时无法获取地址，将在上传前自动补全。Error: ${e.message}")
+                        // 这里不 return，继续往下走，只存经纬度
+                    }
 
                     val record = InspectionRecord(
                         taskId = taskId,
@@ -296,7 +304,7 @@ class InspectionManager(
                     )
 
                     repository.saveRecord(record)
-                    Log.i(TAG, "💾 记录已写入数据库 [${record.id}]")
+                    Log.i(TAG, "💾 记录已写入数据库 [${record.id}] (离线模式: ${addressStr.isEmpty()})")
 
                     // 3. 通知 UI
                     onImageSaved(savedUri)
