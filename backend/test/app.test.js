@@ -153,6 +153,51 @@ describe("🚀 Road Inspection API Integration Tests", () => {
       const finishedTask = await Task.findOne({ taskId: taskData.taskId });
       expect(finishedTask.isFinished).toBe(true);
     });
+
+    it("GET /api/task/list - 应该只返回指定用户的任务且按时间倒序排列", async () => {
+      // 1. 准备测试数据
+      // 创建两个不同的用户 ID (模拟 ObjectId)
+      const userA = new mongoose.Types.ObjectId();
+      const userB = new mongoose.Types.ObjectId();
+
+      // 为 User A 创建任务 (一个是旧的，一个是新的)
+      await Task.create({
+        taskId: "task-a-old",
+        title: "User A Old Task",
+        inspectorId: userA,
+        startTime: 1000,
+      });
+      await Task.create({
+        taskId: "task-a-new",
+        title: "User A New Task",
+        inspectorId: userA,
+        startTime: 2000,
+      });
+
+      // 为 User B 创建任务 (干扰项)
+      await Task.create({
+        taskId: "task-b-001",
+        title: "User B Task",
+        inspectorId: userB,
+        startTime: 1500,
+      });
+
+      // 2. 发起请求：查询 User A 的任务
+      const res = await request(app.callback()).get(
+        `/api/task/list?userId=${userA.toHexString()}`,
+      );
+
+      // 3. 断言验证
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2); // 应该只有 2 条，User B 的不应出现
+
+      // 验证排序 (最新的在前面)
+      expect(res.body.data[0].taskId).toBe("task-a-new");
+      expect(res.body.data[1].taskId).toBe("task-a-old");
+
+      // 验证 inspectorId 是否正确
+      expect(res.body.data[0].inspectorId).toBe(userA.toHexString());
+    });
   });
 
   // ----------------------------------------------------------

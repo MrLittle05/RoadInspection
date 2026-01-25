@@ -34,9 +34,7 @@ class InspectionRepository(private val dao: InspectionDao) {
      * @param title 任务标题 (例如 "2023-12-30 中山路巡检")
      * @return 新生成的任务 ID (UUID 字符串)，供后续拍照时关联使用。
      */
-    suspend fun createTask(title: String): String {
-        //TODO: 从全局 Session获取当前登录人的 ID
-        val currentUserId = "user_default"
+    suspend fun createTask(title: String, currentUserId: String): String {
 
         val task = InspectionTask(title = title, inspectorId = currentUserId)
         dao.insertTask(task)

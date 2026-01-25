@@ -97,7 +97,7 @@ class InspectionManager(
      *
      * @param title 任务标题 (可选，为空则自动生成时间戳标题)
      */
-    fun startInspection(title: String? = null) {
+    fun startInspection(title: String? = null, currentUserId: String) {
         Log.i(TAG, "🟢 正在启动巡检任务...")
         scope.launch {
             // 1. 启动基础设施
@@ -115,7 +115,7 @@ class InspectionManager(
 
             // 3. 数据库建单
             val taskTitle = title ?: generateDefaultTitle()
-            currentTaskId = repository.createTask(taskTitle)
+            currentTaskId = repository.createTask(taskTitle, currentUserId)
             Log.i(TAG, "3. 任务创建成功 TaskId: $currentTaskId, Title: $taskTitle")
 
             // 4. 重置业务状态

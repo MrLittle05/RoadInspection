@@ -448,6 +448,51 @@ router.post("/api/task/finish", async (ctx) => {
 });
 
 /**
+ * @route GET /api/task/list
+ * @summary 获取指定用户的任务列表
+ * @description
+ * 根据 userId (inspectorId) 拉取该巡检员的所有任务。
+ * 结果按任务开始时间 (startTime) 倒序排列 (最新的在前)。
+ *
+ * @param {string} userId - 用户 ID (Query Param, e.g., ?userId=xxx)
+ */
+router.get("/api/task/list", async (ctx) => {
+  // 1. 获取查询参数
+  const { userId } = ctx.query;
+
+  // 2. 参数校验
+  if (!userId) {
+    console.warn(`⚠️ [Task List] 请求缺失 userId`);
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "参数 userId 不能为空" };
+    return;
+  }
+
+  console.log(`🔍 [Task List] 正在查询用户任务: ${userId}`);
+
+  try {
+    // 3. 数据库查询
+    // 过滤条件: inspectorId 匹配 userId
+    // 排序: startTime: -1 (降序/最新的在最上面)
+    const tasks = await Task.find({ inspectorId: userId }).sort({
+      startTime: -1,
+    });
+
+    console.log(`✅ [Task List] 查询成功: 找到 ${tasks.length} 个任务`);
+
+    ctx.body = {
+      code: 200,
+      data: tasks,
+      message: "获取任务列表成功",
+    };
+  } catch (e) {
+    console.error(`❌ [Task List] 查询失败 (User: ${userId}):`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "获取任务列表失败" };
+  }
+});
+
+/**
  * @route GET /api/record/list
  * @summary 前端获取指定任务下的所有病害记录
  * @description

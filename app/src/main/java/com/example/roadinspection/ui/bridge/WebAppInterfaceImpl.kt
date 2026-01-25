@@ -19,9 +19,9 @@ class AndroidNativeApiImpl(
 ) : AndroidNativeApi {
 
     @JavascriptInterface
-    override fun startInspection() {
+    override fun startInspection(title: String?, currentUserId: String) {
         showToast("开始巡检：Native 收到指令")
-        inspectionManager.startInspection()
+        inspectionManager.startInspection(title, currentUserId)
     }
 
     @JavascriptInterface
@@ -33,7 +33,7 @@ class AndroidNativeApiImpl(
     @JavascriptInterface
     override fun manualCapture() {
         val result = inspectionManager.manualCapture()
-        if (result == false) showToast("当前无巡检任务，拍照失败")
+        if (!result) showToast("当前无巡检任务，拍照失败")
     }
 
     @JavascriptInterface
