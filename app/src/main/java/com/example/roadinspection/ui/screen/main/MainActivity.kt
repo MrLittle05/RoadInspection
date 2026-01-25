@@ -36,6 +36,7 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import kotlin.math.abs
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.amap.api.services.core.ServiceSettings
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
@@ -51,6 +52,10 @@ import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
 import com.example.roadinspection.utils.notifyJsUpdateIri
 import com.example.roadinspection.worker.WorkManagerConfig
+import com.example.roadinspection.data.model.VersionInfo
+import com.example.roadinspection.utils.UpdateManager
+import com.example.roadinspection.R
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -67,8 +72,29 @@ class MainActivity : ComponentActivity() {
         Log.d("Permissions", "Permissions granted: $permissions")
     }
 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // 👇 核心代码在这里
+        // 使用 lifecycleScope 启动一个协程
+        lifecycleScope.launch {
+
+            // 1. 模拟：这里应该是一个真正的网络请求，去获取服务器的 JSON
+            // 假设这是从服务器拿到的数据
+            val serverVersion = VersionInfo(
+                versionCode = 2,
+                versionName = "1.1.0",
+                downloadUrl = "http://你的服务器/app.apk",
+                forceUpdate = false,
+                description = "修复了一些Bug"
+            )
+
+            // 2. 调用你的 UpdateManager
+            // 此时，UpdateManager 里的代码就会变成“被引用”状态，不再报灰
+            UpdateManager.checkAndDownload(this@MainActivity, serverVersion)
+        }
 
         // 1. 初始化高德地图隐私配置 (必须在初始化 Provider 前)
         ServiceSettings.updatePrivacyShow(this, true, true)
