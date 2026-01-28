@@ -3,6 +3,7 @@ package com.example.roadinspection.data.source.remote
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 // -------------------------------------------------------------------------
 // Region: 数据传输对象 (DTOs) - 响应模型
@@ -34,6 +35,25 @@ data class StsCredentials(
     val stsToken: String,
     val region: String, // e.g., "oss-cn-shanghai"
     val bucket: String  // e.g., "road-inspection-dev"
+)
+
+data class TaskDto(
+    val taskId: String,
+    val title: String,
+    val inspectorId: String,
+    val startTime: Long,
+    val endTime: Long?,
+    val isFinished: Boolean
+)
+
+data class RecordDto(
+    val recordId: String,
+    val taskId: String,
+    val serverUrl: String,
+    val captureTime: Long,
+    val address: String,
+    val rawLat: Double,
+    val rawLng: Double
 )
 
 // -------------------------------------------------------------------------
@@ -71,6 +91,7 @@ data class FinishTaskReq(
  * 对应 /api/record/submit 接口参数 。
  */
 data class SubmitRecordReq(
+    val recordId: String,
     val taskId: String,
     val serverUrl: String, // 图片在 OSS 的完整 URL
     val latitude: Double,
@@ -118,4 +139,18 @@ interface InspectionApiService {
      */
     @POST("/api/record/submit")
     suspend fun submitRecord(@Body req: SubmitRecordReq): ApiResponse<Unit>
+
+    /**
+     * 获取任务列表。
+     * [cite: 63]
+     */
+    @GET("/api/task/list")
+    suspend fun fetchTasks(@Query("userId") userId: String): ApiResponse<List<TaskDto>>
+
+    /**
+     * 获取指定任务的照片记录。
+     * [cite: 64]
+     */
+    @GET("/api/record/list")
+    suspend fun fetchRecords(@Query("taskId") taskId: String): ApiResponse<List<RecordDto>>
 }

@@ -103,6 +103,7 @@ const taskSchema = new Schema({
  * 对应具体的病害点，包含地理位置
  */
 const recordSchema = new Schema({
+  recordId: { type: String, required: true, unique: true, index: true },
   // 外键关联：指向所属的 Task (注意这里是 taskId 字符串，不是 _id)
   taskId: { type: String, required: true, index: true },
 

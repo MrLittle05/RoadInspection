@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -20,7 +21,7 @@ import java.io.IOException
  *
  * **测试策略：**
  * 使用 Room 的内存数据库 (In-Memory Database) 在 Android 环境中运行。
- * 验证 SQL 语句的正确性、外键约束、级联删除以及业务状态流转逻辑。
+ * 验证 SQL 语句的正确性、外键约束、级联删除以及复杂的业务状态流转逻辑（如智能合并、文件清理）。
  *
  * **环境：** Android Instrumented Test (需要连接真机或模拟器)。
  */
@@ -33,9 +34,9 @@ class InspectionDaoTest {
     @Before
     fun createDb() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        // 关键：创建内存数据库，数据仅存在于 RAM 中，进程结束即销毁，不会污染手机存储
+        // 创建内存数据库，进程结束即销毁，不污染真实存储
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
-            .allowMainThreadQueries() // 允许在主线程测试，简化协程代码
+            .allowMainThreadQueries() // 测试环境允许主线程查询
             .build()
         dao = db.inspectionDao()
     }
@@ -47,236 +48,337 @@ class InspectionDaoTest {
     }
 
     // -------------------------------------------------------------------------
-    // Region: Task 业务流程测试
+    // Region: 基础任务管理 (Basic Task CRUD)
     // -------------------------------------------------------------------------
 
     /**
-     * 测试任务的基础 CRUD：插入与查询。
+     * 测试任务插入与基础查询。
      *
-     * **目标：** 验证 [InspectionDao.insertTask] 能正确写入数据，且 [InspectionDao.getTaskById] 能正确读取。
-     * **验证点：**
-     * 1. 任务标题是否一致。
-     * 2. 默认的 `isFinished` 状态是否为 false。
+     * **目标：** 验证 [InspectionDao.insertTask] 数据写入正确，且 [InspectionDao.getAllTasks] Flow 能发射数据。
      */
     @Test
-    fun insertAndGetTask() = runBlocking {
-        // Arrange (准备)
-        val task = InspectionTask(taskId = "t1", title = "测试任务")
+    fun insertAndGetAllTasks() = runBlocking {
+        // Arrange
+        val task1 = InspectionTask(taskId = "t1", title = "Task 1", startTime = 1000)
+        val task2 = InspectionTask(taskId = "t2", title = "Task 2", startTime = 2000)
 
-        // Act (执行)
-        dao.insertTask(task)
-        val loaded = dao.getTaskById("t1")
+        // Act
+        dao.insertTask(task1)
+        dao.insertTask(task2)
 
-        // Assert (验证)
-        assertNotNull("查询结果不应为空", loaded)
-        assertEquals("测试任务", loaded?.title)
-        assertEquals("新任务默认应未完成", false, loaded?.isFinished)
+        // Assert: 验证 Flow 发射列表，且按 startTime DESC 排序
+        val tasks = dao.getAllTasks().first()
+        assertEquals("应包含2个任务", 2, tasks.size)
+        assertEquals("Task 2 应排在前面 (时间倒序)", "t2", tasks[0].taskId)
+        assertEquals("t1", tasks[1].taskId)
     }
 
     /**
      * 测试结束任务逻辑。
      *
-     * **目标：** 验证 [InspectionDao.finishTask] SQL 语句是否正确更新了状态和时间。
-     * **验证点：**
-     * 1. `isFinished` 状态是否变为 true。
-     * 2. `endTime` 是否被更新为传入的时间戳。
+     * **目标：** 验证 [InspectionDao.finishTask] 正确更新 `isFinished` 标记和 `endTime`。
      */
     @Test
-    fun finishTaskUpdatesStatusAndTime() = runBlocking {
+    fun finishTaskUpdatesStatus() = runBlocking {
         // Arrange
-        val task = InspectionTask(taskId = "t1", title = "测试任务")
-        dao.insertTask(task)
+        dao.insertTask(InspectionTask(taskId = "t1", title = "Open Task", isFinished = false))
 
         // Act
-        val expectedEndTime = 123456789L
-        dao.finishTask("t1", expectedEndTime)
+        val endTime = 99999L
+        dao.finishTask("t1", endTime)
         val loaded = dao.getTaskById("t1")
 
         // Assert
-        assertEquals("任务状态应标记为已完成", true, loaded?.isFinished)
-        assertEquals("结束时间应被正确记录", expectedEndTime, loaded?.endTime)
+        assertNotNull(loaded)
+        assertTrue("任务应标记为已完成", loaded!!.isFinished)
+        assertEquals("结束时间应更新", endTime, loaded.endTime)
     }
 
+    // -------------------------------------------------------------------------
+    // Region: 任务同步状态流转 (Task Sync Logic)
+    // -------------------------------------------------------------------------
+
     /**
-     * 测试完整的任务同步状态流转逻辑 (WorkManager 核心依赖)。
+     * 测试查找待同步任务与状态更新。
      *
-     * **目标：** 模拟从“创建”到“上传”再到“结束”的全过程，验证状态查询方法。
-     * **流程验证：**
-     * 1. [getUnsyncedTasks]: 只返回 `syncState=0` 的任务。
-     * 2. [updateTaskSyncState]: 验证状态从 0 -> 1 的更新。
-     * 3. [getFinishedButNotSyncedTasks]: 验证找出“已完结但未同步结束状态”的任务。
+     * **目标：** 验证 SyncState 状态机流转 (0 -> 1 -> 2)。
      */
     @Test
-    fun syncStateFlowTest() = runBlocking {
-        // Arrange: 插入两个不同状态的任务
-        // t1: 本地新建，未同步 (SyncState=0)
-        // t2: 已同步 (SyncState=1)
-        val t1 = InspectionTask(taskId = "t1", title = "未同步", syncState = 0)
-        val t2 = InspectionTask(taskId = "t2", title = "已同步", syncState = 1)
-        dao.insertTask(t1)
-        dao.insertTask(t2)
+    fun taskSyncStateFlow() = runBlocking {
+        // Arrange: 插入不同状态的任务
+        // t1: State=0 (新建未上传)
+        // t2: State=1 (已上传)
+        dao.insertTask(InspectionTask(taskId = "t1", title = "New Local", syncState = 0))
+        dao.insertTask(InspectionTask(taskId = "t2", title = "Synced", syncState = 1))
 
-        // Step 1: 验证只查出未同步的任务
+        // Act 1: 查找未同步任务
         val unsynced = dao.getUnsyncedTasks()
         assertEquals("应只有1个未同步任务", 1, unsynced.size)
         assertEquals("t1", unsynced[0].taskId)
 
-        // Step 2: 模拟 t1 上传成功，状态更新为 1
+        // Act 2: 更新 t1 状态为 1
         dao.updateTaskSyncState("t1", 1)
-        assertEquals("t1 状态应更新为 1", 1, dao.getTaskById("t1")?.syncState)
+        val t1Updated = dao.getTaskById("t1")
+        assertEquals("t1 状态应变为 1", 1, t1Updated?.syncState)
 
-        // Step 3: 模拟 t1 点击了结束巡检，但服务器还不知道 (isFinished=1, syncState=1)
+        // Act 3: t1 完成巡检，验证 "已完成但状态未更新" 的查询
         dao.finishTask("t1", System.currentTimeMillis())
-        val finishedButNotSynced = dao.getFinishedButNotSyncedTasks()
-
-        assertEquals("应找出需同步结束状态的任务", 1, finishedButNotSynced.size)
-        assertEquals("t1", finishedButNotSynced[0].taskId)
+        val finishedNotSynced = dao.getFinishedButNotSyncedTasks()
+        assertEquals("应找出已完成但SyncState=1的任务", 1, finishedNotSynced.size)
+        assertEquals("t1", finishedNotSynced[0].taskId)
     }
 
     // -------------------------------------------------------------------------
-    // Region: Record 业务流程测试
+    // Region: 记录管理 (Record CRUD)
     // -------------------------------------------------------------------------
 
     /**
-     * 测试记录的插入与基于 Flow 的列表查询。
+     * 测试记录插入与查询。
      *
-     * **目标：** 验证 [InspectionDao.getRecordsByTask] 能正确返回关联任务的记录，并按时间排序。
-     * **前置条件：** 必须先插入父任务 (InspectionTask)，否则外键约束会失败。
+     * **目标：** 验证 [InspectionDao.insertRecord] 与 [InspectionDao.getRecordsByTask] 的联动。
      */
     @Test
-    fun insertAndGetRecordsByTask() = runBlocking {
-        // Arrange: 必须先插入 Task (外键约束)
-        val task = InspectionTask(taskId = "t1", title = "Parent")
-        dao.insertTask(task)
+    fun insertAndGetRecords() = runBlocking {
+        // Arrange: 必须先有父任务
+        dao.insertTask(InspectionTask(taskId = "t1", title = "Parent"))
 
-        // 插入两条时间不同的记录
-        val r1 = InspectionRecord(taskId = "t1", localPath = "/path/1", captureTime = 100, latitude = 0.0, longitude = 0.0)
-        val r2 = InspectionRecord(taskId = "t1", localPath = "/path/2", captureTime = 200, latitude = 0.0, longitude = 0.0)
+        val r1 = InspectionRecord(taskId = "t1", localPath = "path1", captureTime = 100, latitude = 0.0, longitude = 0.0)
+        val r2 = InspectionRecord(taskId = "t1", localPath = "path2", captureTime = 200, latitude = 0.0, longitude = 0.0)
 
         // Act
         dao.insertRecord(r1)
         dao.insertRecord(r2)
 
-        // Assert: 通过 Flow 获取第一个快照
+        // Assert
         val records = dao.getRecordsByTask("t1").first()
-        assertEquals("应包含2条记录", 2, records.size)
-        // 验证排序 ORDER BY capture_time ASC
-        assertEquals("应按时间升序排列", "/path/1", records[0].localPath)
-        assertEquals("/path/2", records[1].localPath)
+        assertEquals(2, records.size)
+        assertEquals("path1", records[0].localPath) // 按时间 ASC
     }
 
     /**
-     * 测试记录的更新操作 (模拟上传回填)。
+     * 测试 WorkManager 批量获取与计数。
      *
-     * **目标：** 验证 [InspectionDao.updateRecord] 能正确更新 `serverUrl` 和 `syncStatus`。
-     * **场景：** 图片上传 OSS 成功后，需要回填 URL 并将状态置为 1 (IMAGE_UPLOADED)。
+     * **目标：** 验证 [InspectionDao.getBatchUnfinishedRecords] 的 limit 限制及计数器准确性。
      */
     @Test
-    fun updateRecordStatusAndUrl() = runBlocking {
+    fun batchQueryAndCount() = runBlocking {
         // Arrange
         dao.insertTask(InspectionTask(taskId = "t1", title = "Parent"))
-        val record = InspectionRecord(taskId = "t1", localPath = "/path/1", captureTime = 100, latitude = 0.0, longitude = 0.0)
-        val id = dao.insertRecord(record) // 获取插入后的自增 ID
-
-        // Act: 模拟上传成功，构造更新对象
-        // 注意：必须 copy 并带上正确的 id，否则 Room 无法找到对应记录
-        val recordToUpdate = record.copy(id = id, serverUrl = "http://oss.com/img.jpg", syncStatus = 1)
-        dao.updateRecord(recordToUpdate)
-
-        // Assert
-        val loadedList = dao.getRecordsByTask("t1").first()
-        val loaded = loadedList[0]
-        assertEquals("URL应已更新", "http://oss.com/img.jpg", loaded.serverUrl)
-        assertEquals("同步状态应已更新", 1, loaded.syncStatus)
-    }
-
-    /**
-     * 测试批量查询的 Limit 限制逻辑。
-     *
-     * **目标：** 验证 [InspectionDao.getBatchUnfinishedRecords] 是否严格遵守传入的 limit 参数。
-     * **场景：** 插入 15 条数据，限制取 10 条，验证返回数量及顺序。
-     */
-    @Test
-    fun batchQueryWithLimit() = runBlocking {
-        // Arrange: 插入 15 条未完成记录
-        dao.insertTask(InspectionTask(taskId = "t1", title = "Parent"))
-        for (i in 1..15) {
-            dao.insertRecord(InspectionRecord(
-                taskId = "t1", localPath = "p$i", captureTime = i.toLong(),
-                syncStatus = 0, latitude = 0.0, longitude = 0.0
-            ))
+        // 插入 5 条未同步(0)，1 条已同步(2)
+        for (i in 1..5) {
+            dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p$i", syncStatus = 0, captureTime = i.toLong(), latitude = 0.0, longitude = 0.0))
         }
+        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "synced", syncStatus = 2, captureTime = 100, latitude = 0.0, longitude = 0.0))
 
-        // Act: 限制取 10 条
-        val batch = dao.getBatchUnfinishedRecords(limit = 10)
+        // Act
+        val batch = dao.getBatchUnfinishedRecords(limit = 3)
+        val count = dao.getUnfinishedCount().first()
 
         // Assert
-        assertEquals("应严格限制返回 10 条", 10, batch.size)
-        assertEquals("应从最早的记录开始取", "p1", batch.first().localPath)
-        assertEquals("p10", batch.last().localPath)
+        assertEquals("Batch limit 应限制为 3", 3, batch.size)
+        assertEquals("总未完成数应为 5", 5, count)
+        assertTrue("Batch 结果不应包含已同步记录", batch.none { it.syncStatus == 2 })
     }
 
     // -------------------------------------------------------------------------
-    // Region: 高级功能测试 (级联删除 & 清理)
+    // Region: 数据清理与维护 (Cleanup)
     // -------------------------------------------------------------------------
 
     /**
-     * 测试数据库外键的级联删除 (Cascade Delete) 特性。
+     * 测试本地文件路径清理逻辑 (释放空间但不删数据)。
      *
-     * **目标：** 验证当删除父任务 (Task) 时，其下属的所有记录 (Records) 是否会自动被删除。
-     * **重要性：** 保证数据一致性，防止出现“孤儿”数据。
+     * **目标：** 验证 [InspectionDao.getRecordsToClean] 筛选条件及 [InspectionDao.clearLocalPaths] 执行效果。
+     * **筛选条件：** syncStatus=2 (已同步) AND localPath!='' (有文件) AND time < threshold (过期)。
      */
     @Test
-    fun cascadeDelete_whenTaskDeleted_recordsAreDeleted() = runBlocking {
+    fun cleanLocalFilePaths() = runBlocking {
         // Arrange
-        dao.insertTask(InspectionTask(taskId = "t1", title = "Parent"))
-        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p1", captureTime = 1, latitude = 0.0, longitude = 0.0))
-        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p2", captureTime = 2, latitude = 0.0, longitude = 0.0))
+        val threshold = 2000L
+        dao.insertTask(InspectionTask(taskId = "t1", title = "P"))
 
-        // Pre-check
-        assertEquals("删除前应有2条记录", 2, dao.getRecordsByTask("t1").first().size)
+        // Case 1: 完美符合 (已同步，有路径，已过期)
+        val r1 = InspectionRecord(recordId = "r1", taskId = "t1", localPath = "/sdcard/img1.jpg", syncStatus = 2, captureTime = 1000, latitude = 0.0, longitude = 0.0)
+        // Case 2: 未同步 (不应清理)
+        val r2 = InspectionRecord(recordId = "r2", taskId = "t1", localPath = "/sdcard/img2.jpg", syncStatus = 0, captureTime = 1000, latitude = 0.0, longitude = 0.0)
+        // Case 3: 未过期 (不应清理)
+        val r3 = InspectionRecord(recordId = "r3", taskId = "t1", localPath = "/sdcard/img3.jpg", syncStatus = 2, captureTime = 3000, latitude = 0.0, longitude = 0.0)
 
-        // Act: 删除任务
+        dao.insertRecord(r1)
+        dao.insertRecord(r2)
+        dao.insertRecord(r3)
+
+        // Act 1: 获取待清理列表
+        val toClean = dao.getRecordsToClean(expirationThreshold = threshold)
+
+        // Assert 1
+        assertEquals("应只有 r1 符合清理条件", 1, toClean.size)
+        assertEquals("r1", toClean[0].recordId)
+
+        // Act 2: 执行清理
+        dao.clearLocalPaths(listOf("r1"))
+        val r1Loaded = dao.getRecordsByTask("t1").first().find { it.recordId == "r1" }
+
+        // Assert 2
+        assertNotNull(r1Loaded)
+        assertEquals("LocalPath 应被置空", "", r1Loaded?.localPath)
+        assertEquals("SyncStatus 应保持不变", 2, r1Loaded?.syncStatus)
+    }
+
+    /**
+     * 测试级联删除。
+     *
+     * **目标：** 验证删除任务时，关联记录自动删除。
+     */
+    @Test
+    fun cascadeDeleteTask() = runBlocking {
+        // Arrange
+        dao.insertTask(InspectionTask(taskId = "t1", title = "P"))
+        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p", captureTime = 1, latitude = 0.0, longitude = 0.0))
+
+        // Act
         dao.deleteTask("t1")
 
-        // Assert: 验证数据被清空
-        val task = dao.getTaskById("t1")
+        // Assert
+        assertNull("任务应不存在", dao.getTaskById("t1"))
         val records = dao.getRecordsByTask("t1").first()
+        assertTrue("记录应被级联清空", records.isEmpty())
+    }
 
-        assertEquals("任务应被删除", null, task)
-        assertEquals("关联的记录应被级联删除", 0, records.size)
+    // -------------------------------------------------------------------------
+    // Region: 智能合并 (Smart Merge) - 核心业务逻辑
+    // -------------------------------------------------------------------------
+
+    /**
+     * 测试任务智能合并：绝对保护机制。
+     *
+     * **场景：** 本地有一个新建未上传的任务 (SyncState=0)。
+     * **预期：** 无论网络端传来什么数据，都不能覆盖本地任务，因为服务器根本不知道这个任务的存在(UUID冲突或极端情况)。
+     */
+    @Test
+    fun smartMergeTask_protectsStrictlyLocalTask() = runBlocking {
+        // Arrange
+        val localTask = InspectionTask(taskId = "t1", title = "Local Draft", syncState = 0)
+        dao.insertTask(localTask)
+
+        val networkTask = InspectionTask(taskId = "t1", title = "Network Override", syncState = 2)
+
+        // Act
+        dao.smartMergeTasks(listOf(networkTask))
+
+        // Assert
+        val current = dao.getTaskById("t1")
+        assertEquals("应保留本地标题", "Local Draft", current?.title)
+        assertEquals("SyncState 应保持 0", 0, current?.syncState)
     }
 
     /**
-     * 测试过期数据的清理逻辑。
+     * 测试任务智能合并：相对保护机制 (本地已完成 vs 网络未完成)。
      *
-     * **目标：** 验证 [InspectionDao.deleteExpiredRecords] 的筛选逻辑是否严谨。
-     * **筛选条件验证：**
-     * 1. 必须是已完成 (syncStatus = 2) 的数据。
-     * 2. 必须早于过期时间戳。
-     * 3. 未完成或未过期的数据不应被误删。
+     * **场景：** 本地任务已完成 (isFinished=1, State=1)，但网络端因为滞后，显示该任务未完成。
+     * **预期：** 拒绝网络端的更新，防止本地“已完成”状态被回滚为“进行中”。
      */
     @Test
-    fun deleteExpiredRecords() = runBlocking {
+    fun smartMergeTask_protectsLocalFinishedStatus() = runBlocking {
         // Arrange
-        dao.insertTask(InspectionTask(taskId = "t1", title = "Parent"))
+        // 本地：已完成，等待同步结束状态
+        val localTask = InspectionTask(taskId = "t1", title = "Job", isFinished = true, syncState = 1)
+        dao.insertTask(localTask)
 
-        // r1: 已完成(2)，时间 1000 -> 应被删除 (满足两个条件)
-        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p1", captureTime = 1000, syncStatus = 2, latitude = 0.0, longitude = 0.0))
-        // r2: 已完成(2)，时间 3000 -> 保留 (未过期，3000 > 2000)
-        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p2", captureTime = 3000, syncStatus = 2, latitude = 0.0, longitude = 0.0))
-        // r3: 未完成(0)，时间 1000 -> 保留 (未完成，尽管时间已过)
-        dao.insertRecord(InspectionRecord(taskId = "t1", localPath = "p3", captureTime = 1000, syncStatus = 0, latitude = 0.0, longitude = 0.0))
+        // 网络：滞后数据，显示未完成
+        val networkTask = InspectionTask(taskId = "t1", title = "Job", isFinished = false, syncState = 1)
 
-        // Act: 删除 2000 毫秒以前的已完成记录
-        val deletedCount = dao.deleteExpiredRecords(expirationTime = 2000)
+        // Act
+        dao.smartMergeTasks(listOf(networkTask))
 
         // Assert
-        assertEquals("应只有1条符合条件的记录被删除", 1, deletedCount)
+        val current = dao.getTaskById("t1")
+        assertTrue("应保留本地已完成状态", current!!.isFinished)
+    }
 
-        val remaining = dao.getRecordsByTask("t1").first()
-        assertEquals("应剩余2条记录", 2, remaining.size)
-        assertTrue("未过期的记录应保留", remaining.any { it.localPath == "p2" })
-        assertTrue("未同步完成的记录应保留", remaining.any { it.localPath == "p3" })
+    /**
+     * 测试任务智能合并：正常合并。
+     *
+     * **场景：** 本地任务已完成，网络端也显示已完成 (双方达成共识)。
+     * **预期：** 允许更新，接受网络端的最新数据 (如 syncState=2, updated title)。
+     */
+    @Test
+    fun smartMergeTask_allowsUpdateWhenConsensus() = runBlocking {
+        // Arrange
+        val localTask = InspectionTask(taskId = "t1", title = "Old Title", isFinished = true, syncState = 1)
+        dao.insertTask(localTask)
+
+        // 网络：也完成了，且带来了新标题和终态 (State=2)
+        val networkTask = InspectionTask(taskId = "t1", title = "New Title", isFinished = true, syncState = 2)
+
+        // Act
+        dao.smartMergeTasks(listOf(networkTask))
+
+        // Assert
+        val current = dao.getTaskById("t1")
+        assertEquals("标题应被网络更新", "New Title", current?.title)
+        assertEquals("状态应更新为 Finalized (2)", 2, current?.syncState)
+    }
+
+    /**
+     * 测试记录智能合并：保护本地未上传的修改。
+     *
+     * **场景：** 本地有一条记录被修改过或新建 (SyncStatus=0)，网络端有同ID的记录。
+     * **预期：** 保留本地记录，丢弃网络记录。
+     */
+    @Test
+    fun smartMergeRecord_protectsUnsyncedRecords() = runBlocking {
+        // Arrange
+        dao.insertTask(InspectionTask(taskId = "t1", title = "P"))
+
+        // 本地：有一条记录，备注了 address="Local Edit"，状态未同步
+        val localRec = InspectionRecord(
+            recordId = "r1", taskId = "t1", localPath = "p1",
+            address = "Local Edit", syncStatus = 0, // 0 = Pending
+            captureTime = 100, latitude = 0.0, longitude = 0.0
+        )
+        dao.insertRecord(localRec)
+
+        // 网络：同ID，address="Cloud Version"
+        val netRec = localRec.copy(address = "Cloud Version", syncStatus = 2)
+
+        // Act
+        dao.smartMergeRecords("t1", listOf(netRec))
+
+        // Assert
+        val records = dao.getRecordsByTask("t1").first()
+        val r1 = records.find { it.recordId == "r1" }
+        assertEquals("应保留本地修改的地址", "Local Edit", r1?.address)
+        assertEquals("状态应保持未同步", 0, r1?.syncStatus)
+    }
+
+    /**
+     * 测试记录智能合并：覆盖已同步记录。
+     *
+     * **场景：** 本地记录已同步 (SyncStatus=2)，网络端有更新。
+     * **预期：** 接受网络端数据。
+     */
+    @Test
+    fun smartMergeRecord_overwritesSyncedRecords() = runBlocking {
+        // Arrange
+        dao.insertTask(InspectionTask(taskId = "t1", title = "P"))
+
+        // 本地：已同步
+        val localRec = InspectionRecord(
+            recordId = "r1", taskId = "t1", localPath = "p1",
+            address = "Old", syncStatus = 2, // 2 = Synced
+            captureTime = 100, latitude = 0.0, longitude = 0.0
+        )
+        dao.insertRecord(localRec)
+
+        // 网络：更新了地址
+        val netRec = localRec.copy(address = "New Cloud", syncStatus = 2)
+
+        // Act
+        dao.smartMergeRecords("t1", listOf(netRec))
+
+        // Assert
+        val records = dao.getRecordsByTask("t1").first()
+        val r1 = records.find { it.recordId == "r1" }
+        assertEquals("应接受网络更新", "New Cloud", r1?.address)
     }
 }

@@ -112,11 +112,13 @@ class UploadWorker(
                     }
 
                     // --- Phase B: 提交后端 (State 1 -> 2) ---
-                    if (currentRecord.syncStatus == 1 && currentRecord.serverUrl != null) {
-                        Log.d(TAG, "提交元数据到后端: ${currentRecord.id}")
+                    val serverUrl = currentRecord.serverUrl
+                    if (currentRecord.syncStatus == 1 && serverUrl != null) {
+                        Log.d(TAG, "提交元数据到后端: ${currentRecord.recordId}")
                         val req = SubmitRecordReq(
+                            recordId = currentRecord.recordId,
                             taskId = currentRecord.taskId,
-                            serverUrl = currentRecord.serverUrl!!,
+                            serverUrl = serverUrl,
                             latitude = currentRecord.latitude,
                             longitude = currentRecord.longitude,
                             address = currentRecord.address,

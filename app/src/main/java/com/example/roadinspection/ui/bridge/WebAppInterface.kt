@@ -26,4 +26,10 @@ interface AndroidNativeApi {
 
     @JavascriptInterface
     fun showToast(msg: String)
+
+    @JavascriptInterface
+    fun fetchTasks(userId: String)
+
+    @JavascriptInterface
+    fun fetchRecords(taskId: String)
 }

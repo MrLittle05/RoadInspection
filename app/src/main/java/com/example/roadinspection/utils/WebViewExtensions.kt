@@ -27,3 +27,23 @@ fun WebView.notifyJsUpdateIri(iriValue: Float, segmentDistance: Float) {
         this.evaluateJavascript(script, null)
     }
 }
+
+/**
+ * 通用封装：安全地调用 JS 定义的全局回调函数。
+ *
+ * 1. 自动处理线程切换：内部使用 post，确保 evaluateJavascript 在 UI 线程执行。
+ * 2. 自动构建脚本：封装了 window.method && window.method(...) 的安全调用检查。
+ *
+ * @param methodName JS 全局函数名 (e.g., "onTasksReceived")
+ * @param jsonParams JSON 数据字符串 (e.g., "[{...}]" 或 "{...}")。
+ * 如果是普通字符串，请确保已自行添加引号，建议直接传 Gson 序列化后的 JSON。
+ */
+fun WebView.invokeJsCallback(methodName: String, jsonParams: String) {
+    // 构造脚本：先检查函数是否存在，再执行调用
+    val script = "javascript:window.$methodName && window.$methodName($jsonParams)"
+
+    // View.post 允许从任何线程（包括后台协程）调用，它会将 Runnable 发送到主线程队列
+    this.post {
+        this.evaluateJavascript(script, null)
+    }
+}

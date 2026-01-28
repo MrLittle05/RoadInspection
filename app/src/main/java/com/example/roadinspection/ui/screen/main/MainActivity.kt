@@ -323,9 +323,19 @@ fun WebViewScreen(
 
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> }
 
-    // 3. 注入 JS 接口 (包含 onSetZoom)
-    val androidNativeApi = remember(inspectionManager, context, selectImageLauncher, onSetZoom) {
-        AndroidNativeApiImpl(inspectionManager, context, selectImageLauncher, onSetZoom)
+    // 3. 注入 JS 接口
+    val androidNativeApi = remember(webViewRef, inspectionManager, context, selectImageLauncher, onSetZoom) {
+        webViewRef?.let { wv ->
+            AndroidNativeApiImpl(
+                inspectionManager = inspectionManager,
+                repository = repository,
+                context = context,
+                selectImageLauncher = selectImageLauncher,
+                onSetZoom = onSetZoom,
+                webView = wv,
+                scope = scope
+            )
+        }
     }
 
     val dashboardUpdaterRef = remember { mutableStateOf<DashboardUpdater?>(null) }
@@ -355,11 +365,15 @@ fun WebViewScreen(
                     }
                 }
 
-                addJavascriptInterface(androidNativeApi, "AndroidNative")
                 loadUrl("file:///android_asset/index.html")
             }.also { webViewRef = it }
         },
-        update = { }
+        update = { webView ->
+            // Use .let to ensure the API is only injected if it's not null
+            androidNativeApi?.let { api ->
+                webView.addJavascriptInterface(api, "AndroidNative")
+            }
+        }
     )
 
     // 页面销毁时停止更新

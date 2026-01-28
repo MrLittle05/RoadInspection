@@ -382,6 +382,7 @@ router.post("/api/record/submit", async (ctx) => {
   // Data Transformation (数据清洗与适配)
   // 将扁平化的请求参数转换为符合 GeoJSON 标准的嵌套结构
   const recordData = {
+    recordId: body.recordId,
     taskId: body.taskId,
     serverUrl: body.serverUrl,
     captureTime: body.captureTime,

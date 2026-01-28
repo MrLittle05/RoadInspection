@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -190,8 +191,120 @@ interface InspectionDao {
      * 这不会删除数据库行记录。UI 层检测到 `localPath` 为空时，
      * 应降级使用 `serverUrl` 显示图片或显示“云端存储”标识。
      *
-     * @param ids 需要标记为“已清理”的记录主键 (id) 列表。
+     * @param ids 需要标记为“已清理”的记录主键 (recordId) 列表。
      */
-    @Query("UPDATE inspection_records SET local_path = '' WHERE id IN (:ids)")
-    suspend fun clearLocalPaths(ids: List<Long>)
+    @Query("UPDATE inspection_records SET local_path = '' WHERE record_id IN (:ids)")
+    suspend fun clearLocalPaths(ids: List<String>)
+
+    // -------------------------------------------------------------------------
+    // Region: 任务智能合并 (Task Smart Merge)
+    // -------------------------------------------------------------------------
+
+    /**
+     * 1. 获取本地尚未同步到后端的任务 ID 列表。
+     * 定义：SyncState = 0 (即 0-新建未上传) 且本地有修改权的任务。
+     */
+    @Query("SELECT task_id FROM inspection_tasks WHERE sync_state = 0")
+    suspend fun getUnuploadedTaskIds(): List<String>
+
+    /**
+     * 2. 获取本地已完成但没同步的任务 ID
+     */
+    @Query("SELECT task_id FROM inspection_tasks WHERE is_finished = 1 AND sync_state = 1")
+    suspend fun getFinishedButNotSyncedTaskIds(): List<String>
+
+    /**
+     * 3. 批量插入或更新任务。
+     * 仅用于经过过滤的安全数据。
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateTasks(tasks: List<InspectionTask>)
+
+    /**
+     * 【事务】执行任务列表的智能合并。
+     *
+     * @param networkTasks 来自后端的最新任务列表
+     */
+    @Transaction
+    suspend fun smartMergeTasks(networkTasks: List<InspectionTask>) {
+        if (networkTasks.isEmpty()) return
+
+        // 1. 绝对保护名单：本地新建未上传 (State=0)
+        // 这些任务服务器根本不知道，必须死保
+        val strictlyLocalIds = getUnuploadedTaskIds().toHashSet()
+
+        // 2. 相对保护名单：本地已完成，但还没同步状态 (isFinished=1, State=1)
+        val localFinishedIds = getFinishedButNotSyncedTaskIds().toHashSet()
+
+        val safeToUpdateTasks = networkTasks.filter { netTask ->
+            val taskId = netTask.taskId
+
+            // 情况 A: 绝对保护，直接拒绝
+            if (strictlyLocalIds.contains(taskId)) {
+                return@filter false
+            }
+
+            // 情况 B: 相对保护 (本地已完成)
+            if (localFinishedIds.contains(taskId)) {
+                // 关键点：如果网络说“我也完成了(true)”，说明达成共识，允许更新！
+                // 这样可以将本地 syncState 顺便更新为 2 (Finalized)，且同步最新标题。
+                if (netTask.isFinished) {
+                    return@filter true
+                } else {
+                    // 如果网络说“没完成(false)”，说明网络滞后，拒绝更新，保护本地完成状态。
+                    return@filter false
+                }
+            }
+
+            // 情况 C: 其他普通任务，允许更新
+            true
+        }
+
+        // 3. 批量写入
+        if (safeToUpdateTasks.isNotEmpty()) {
+            insertOrUpdateTasks(safeToUpdateTasks)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Region: 记录智能合并 (Records Smart Merge)
+    // -------------------------------------------------------------------------
+
+    /**
+     * 【核心】合并记录的事务逻辑
+     * * @param taskId 当前任务 ID
+     * @param networkRecords 从后端拉下来的最新数据
+     */
+    @Transaction
+    suspend fun smartMergeRecords(taskId: String, networkRecords: List<InspectionRecord>) {
+        if (networkRecords.isEmpty()) return
+
+        // 1. 获取本地未同步列表 (sync_status != 2)
+        val unsyncedIds = getUnsyncedRecordIds(taskId).toHashSet()
+
+        // 2. 内存过滤：剔除掉那些本地还没上传的数据
+        // 逻辑：如果网络数据里的 ID 在 dirtyIds 里，说明本地有未提交的修改，跳过网络版，保留本地版。
+        val recordsToSave = networkRecords.filter { netRecord ->
+            !unsyncedIds.contains(netRecord.recordId)
+        }
+
+        // 3. 批量写入
+        if (recordsToSave.isNotEmpty()) {
+            insertOrUpdateRecords(recordsToSave)
+        }
+    }
+
+    /**
+     * 查找所有本地“受保护”的记录 ID。
+     * 受保护 = 未完全同步 (sync_status != 2)。这些记录本地比云端新，不能覆盖。
+     */
+    @Query("SELECT record_id FROM inspection_records WHERE task_id = :taskId AND sync_status != 2")
+    suspend fun getUnsyncedRecordIds(taskId: String): List<String>
+
+    /**
+     * 批量插入/更新。
+     * 经过 Filter 后的数据都是安全的，可以直接 Replace。
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateRecords(records: List<InspectionRecord>)
 }

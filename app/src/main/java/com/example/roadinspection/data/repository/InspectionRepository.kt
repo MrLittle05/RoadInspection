@@ -5,6 +5,9 @@ import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.data.source.local.InspectionTask
+import com.example.roadinspection.data.source.remote.TaskDto
+import com.example.roadinspection.data.source.remote.RecordDto
+import com.example.roadinspection.di.NetworkModule.api
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
@@ -157,19 +160,20 @@ class InspectionRepository(private val dao: InspectionDao) {
         val records = dao.getRecordsToClean(threshold)
         if (records.isEmpty()) return 0
 
-        val cleanedIds = mutableListOf<Long>()
+        val cleanedIds = mutableListOf<String>()
         var deletedCount = 0
 
         records.forEach { record ->
             try {
                 var isPhysicallyDeleted = false
 
-                // 1. 解析 URI (修复 file:// 前缀导致 exists() 判错的问题)
-                val uri = android.net.Uri.parse(record.localPath)
-                val filePath = uri.path // 提取纯路径，如 /storage/emulated/0/...
+                val normalizedPath = record.localPath
+                    .replaceFirst(Regex("^file:///?"), "/") // 处理 file:// 和 file:/// 两种变体
+                    .replaceFirst(Regex("^content://.*"), "") // 忽略 content:// (无法直接删除)
 
-                if (filePath != null) {
-                    val file = File(filePath)
+
+                if (normalizedPath.isNotEmpty() && normalizedPath.startsWith("/")) {
+                    val file = File(normalizedPath)
                     if (file.exists()) {
                         // 2. 尝试删除
                         if (file.delete()) {
@@ -178,7 +182,7 @@ class InspectionRepository(private val dao: InspectionDao) {
                         } else {
                             // 删除失败（如权限问题），此时绝对不能更新数据库！
                             // 留待下次任务重试，或者记录日志排查
-                            android.util.Log.w("InspectionRepo", "无法删除文件: $filePath")
+                            android.util.Log.w("InspectionRepo", "无法删除文件: $normalizedPath")
                             isPhysicallyDeleted = false
                         }
                     } else {
@@ -189,7 +193,7 @@ class InspectionRepository(private val dao: InspectionDao) {
 
                 // 3. 只有确认物理文件已消失，才更新数据库
                 if (isPhysicallyDeleted) {
-                    cleanedIds.add(record.id)
+                    cleanedIds.add(record.recordId)
                 }
 
             } catch (e: Exception) {
@@ -204,4 +208,88 @@ class InspectionRepository(private val dao: InspectionDao) {
 
         return deletedCount
     }
+
+    /**
+     * 【智能同步】从网络拉取最新任务列表并合并到本地。
+     *
+     * **合并策略：**
+     * 1. 采用 "Smart Merge" 策略，优先保护本地未同步 (Dirty) 的修改。
+     * 2. 仅更新那些本地状态为 "已同步(SyncState=2)" 或 "新下载" 的任务。
+     *
+     * @throws Exception 网络请求失败时抛出，由调用方捕获日志，不影响本地数据显示。
+     */
+    suspend fun syncTasksFromNetwork(userId: String) {
+        // 1. 发起网络请求
+        val response = api.fetchTasks(userId)
+
+        if (response.isSuccess && response.data != null) {
+            val networkTasks = response.data.map { it.toEntity() }
+
+            // 2. 交给 DAO 进行事务级智能合并
+            // 性能优化：DAO 内部会过滤掉本地正在修改的任务
+            dao.smartMergeTasks(networkTasks)
+        } else {
+            throw RuntimeException("Sync tasks failed: ${response.message}")
+        }
+    }
+
+    /**
+     * 【智能同步】从网络拉取指定任务的照片记录。
+     *
+     * 触发一次“拉取 + 合并”流程。
+     * UI 调用此方法时，不会阻塞当前显示，因为数据是通过 Flow 更新的。
+     */
+    suspend fun syncRecordsFromNetwork(taskId: String) {
+        try {
+            // 1. 发起网络请求
+            val response = api.fetchRecords(taskId)
+
+            if (response.isSuccess && response.data != null) {
+                val networkRecords = response.data.map { it.toEntity() }
+
+                // 2. 调用 DAO 进行智能合并
+                dao.smartMergeRecords(taskId, networkRecords)
+
+                // 合并完成后，Room 会自动通知 getRecordsByTask 的 Flow 发射新数据
+            }
+        } catch (e: Exception) {
+            // 网络错误是预料之中的（如离线模式），打印日志即可，不要崩 UI
+            android.util.Log.w("InspectionRepo", "后台同步记录失败: ${e.message}")
+        }
+    }
+}
+
+/**
+ * 将网络传输对象转换为本地数据库实体
+ * 这里注入本地专属逻辑：SyncState = 2 (已同步)
+ */
+private fun TaskDto.toEntity(): InspectionTask {
+    return InspectionTask(
+        taskId = this.taskId,
+        title = this.title,
+        startTime = this.startTime,
+        endTime = this.endTime,
+        inspectorId = this.inspectorId,
+        isFinished = this.isFinished,
+        // 【关键】由客户端决定：既然是从网上下来的，那肯定是已同步的
+        syncState = if (this.isFinished) 2 else 1
+    )
+}
+
+/**
+ * 将网络记录转换为本地记录
+ * 这里注入本地专属逻辑：SyncStatus = 2, LocalPath = ""
+ */
+private fun RecordDto.toEntity(): InspectionRecord {
+    return InspectionRecord(
+        recordId = this.recordId,
+        taskId = this.taskId,
+        localPath = "",
+        serverUrl = this.serverUrl,
+        syncStatus = 2,
+        captureTime = this.captureTime,
+        latitude = this.rawLat,
+        longitude = this.rawLng,
+        address = this.address
+    )
 }

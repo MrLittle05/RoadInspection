@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.util.UUID
 
 /**
  * 巡检记录实体类 (Child Table)。
@@ -30,11 +31,12 @@ import androidx.room.PrimaryKey
 )
 data class InspectionRecord(
     /**
-     * 本地记录流水号 (自增主键)。
-     * 仅用于本地数据库管理和排序，不参与服务器业务逻辑。
+     * 使用 UUID 作为主键。
+     * 只有在本地创建时生成一次，上传给后端时带上它，后端返回时也带上它。
      */
-    @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
+    @PrimaryKey
+    @ColumnInfo(name = "record_id")
+    val recordId: String = UUID.randomUUID().toString(),
 
     /** 关联的任务 ID (外键) */
     @ColumnInfo(name = "task_id")
