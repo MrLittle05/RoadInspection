@@ -10,6 +10,9 @@ import android.webkit.JavascriptInterface
 interface AndroidNativeApi {
 
     @JavascriptInterface
+    fun startInspectionActivity(url: String)
+
+    @JavascriptInterface
     fun startInspection(title: String?, currentUserId: String)
 
     @JavascriptInterface

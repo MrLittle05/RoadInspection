@@ -1,0 +1,7 @@
+{
+  "name": "RoadGuard Inspection",
+  "description": "A mobile-first application for road inspectors to manage tasks and view detailed pavement distress records.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

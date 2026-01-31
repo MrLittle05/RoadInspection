@@ -1,6 +1,7 @@
 package com.example.roadinspection.ui.bridge
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -9,13 +10,13 @@ import androidx.activity.result.ActivityResultLauncher
 import com.example.roadinspection.data.model.ApiResponse
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.domain.inspection.InspectionManager
+import com.example.roadinspection.ui.screen.inspection.InspectionActivity
 import com.example.roadinspection.utils.invokeJsCallback
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
@@ -33,11 +34,11 @@ import java.lang.ref.WeakReference
  * 防止内存泄漏和 WebView 销毁后的回调崩溃。
  */
 class AndroidNativeApiImpl(
-    private val inspectionManager: InspectionManager,
+    private val inspectionManager: InspectionManager? = null,
     private val repository: InspectionRepository,
     private val context: Context,
-    private val selectImageLauncher: ActivityResultLauncher<String>,
-    private val onSetZoom: (Float) -> Unit,
+    private val selectImageLauncher: ActivityResultLauncher<String>? = null,
+    private val onSetZoom: ((Float) -> Unit)? = null,
     webView: WebView,
     private val scope: CoroutineScope
 ) : AndroidNativeApi {
@@ -52,28 +53,40 @@ class AndroidNativeApiImpl(
     private var currentRecordsJob: Job? = null
 
     @JavascriptInterface
+    override fun startInspectionActivity(url: String) {
+        Log.d(TAG, "JS请求跳转: $url")
+        // 防止 JS 传入 ./inspection.html 或 /inspection.html 导致路径拼接错误
+        val cleanUrl = url.removePrefix("./").removePrefix("/")
+
+        val intent = Intent(context, InspectionActivity::class.java).apply {
+            // 拼接完整 file 协议路径
+            putExtra("TARGET_URL", "file:///android_asset/$cleanUrl")
+        }
+        context.startActivity(intent)
+    }
+
+    @JavascriptInterface
     override fun startInspection(title: String?, currentUserId: String) {
-        showToast("开始巡检：Native 收到指令")
-        inspectionManager.startInspection(title, currentUserId)
+        inspectionManager?.startInspection(title, currentUserId)
+            ?: showToast("错误：当前页面不支持开始巡检")
     }
 
     @JavascriptInterface
     override fun stopInspection() {
-        showToast("停止巡检：数据已保存")
-        inspectionManager.stopInspection()
+        inspectionManager?.stopInspection()
     }
 
     @JavascriptInterface
     override fun manualCapture() {
-        val result = inspectionManager.manualCapture()
-        if (!result) showToast("当前无巡检任务，拍照失败")
+        val result = inspectionManager?.manualCapture() ?: false
+        if (!result && inspectionManager != null) showToast("当前无巡检任务，拍摄失败")
     }
 
     @JavascriptInterface
     override fun openGallery(type: String) {
         when (type) {
             "all" -> {
-                selectImageLauncher.launch("image/*")
+                selectImageLauncher?.launch("image/*")
             }
 
             "route" -> {
@@ -88,7 +101,7 @@ class AndroidNativeApiImpl(
 
     @JavascriptInterface
     override fun setZoom(value: Float) {
-        onSetZoom(value)
+        onSetZoom?.invoke(value)
     }
 
     @JavascriptInterface

@@ -119,7 +119,10 @@ const UI = {
       animateShutter();
     } else {
       if (!states.isRecording) {
-        startRecording();
+        const params = Object.fromEntries(
+          new URLSearchParams(window.location.search),
+        );
+        startRecording(params.taskName, params.userId);
       } else {
         stopRecording();
       }
@@ -140,7 +143,7 @@ const UI = {
     const nextRotation = calculateNextRotation(
       beta,
       gamma,
-      states.currentRotationState
+      states.currentRotationState,
     );
 
     if (nextRotation !== states.currentRotationState) {
@@ -150,7 +153,7 @@ const UI = {
       layoutRoot.classList.remove(
         "mode-portrait",
         "mode-tilt-left",
-        "mode-tilt-right"
+        "mode-tilt-right",
       );
 
       if (states.currentRotationState === 0) {
@@ -185,13 +188,17 @@ function animateShutter() {
   setTimeout(() => flash.remove(), 250);
 }
 
-function startRecording() {
+function startRecording(taskName, userId) {
+  if (!userId) {
+    window.AndroidNative.showToast("请先登录，再开始巡检！");
+    return;
+  }
   states.isRecording = true;
   document.getElementById("shutter-btn").classList.add("recording");
   if (elements.timer) {
     elements.timer.classList.add("active");
   }
-  window.AndroidNative.startInspection();
+  window.AndroidNative.startInspection(taskName, userId);
 
   // 启动计时器
   states.recordSeconds = 0;

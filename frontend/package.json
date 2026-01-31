@@ -1,20 +1,28 @@
 {
-  "name": "frontend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "road-inspection",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "author": "Dame Chen",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "preview": "vite preview"
   },
-  "keywords": [],
-  "author": "Dame Chen",
-  "license": "ISC",
-  "type": "module",
+  "dependencies": {
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-virtuoso": "^4.6.2",
+    "recharts": "^3.7.0"
+  },
   "devDependencies": {
-    "vite": "^7.3.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
     "vite-plugin-singlefile": "^2.3.0"
   }
 }
