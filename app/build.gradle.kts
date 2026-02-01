@@ -51,6 +51,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -69,6 +70,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.gson)
     implementation("com.amap.api:3dmap-location-search:10.1.600_loc6.5.1_sea9.7.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -89,6 +91,7 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 }
 
 // === 粘贴在 app/build.gradle.kts 的最末尾 ===
