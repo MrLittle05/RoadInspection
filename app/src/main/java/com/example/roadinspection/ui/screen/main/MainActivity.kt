@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.ui.bridge.AndroidNativeApiImpl
 import com.example.roadinspection.ui.theme.GreetingCardTheme
 import kotlinx.coroutines.launch
@@ -30,6 +31,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        TokenManager.init(applicationContext)
 
         // 基础权限申请
         val permissions = mutableListOf<String>()

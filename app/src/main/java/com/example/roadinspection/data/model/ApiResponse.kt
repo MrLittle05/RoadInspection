@@ -8,15 +8,22 @@ package com.example.roadinspection.data.model
  */
 data class ApiResponse<T>(
     val code: Int,      // 状态码：200=成功, 500=错误
-    val msg: String,    // 提示信息："success" 或 具体的错误堆栈/提示
+
+    // 后端返回的是 { "code": 200, "message": "..." }
+    val message: String,
+
     val data: T?        // 实际业务数据
 ) {
+    // 方便判断业务是否成功
+    val isSuccess: Boolean
+        get() = code == 200
+
     companion object {
         /**
          * 构建成功响应
          */
-        fun <T> success(data: T): ApiResponse<T> {
-            return ApiResponse(200, "success", data)
+        fun <T> success(data: T? = null, msg: String = "success"): ApiResponse<T> {
+            return ApiResponse(200, msg, data)
         }
 
         /**

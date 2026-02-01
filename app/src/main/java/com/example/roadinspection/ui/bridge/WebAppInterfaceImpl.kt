@@ -10,6 +10,7 @@ import androidx.activity.result.ActivityResultLauncher
 import com.example.roadinspection.BuildConfig
 import com.example.roadinspection.data.model.ApiResponse
 import com.example.roadinspection.data.repository.InspectionRepository
+import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.ui.screen.inspection.InspectionActivity
 import com.example.roadinspection.utils.invokeJsCallback
@@ -56,6 +57,48 @@ class AndroidNativeApiImpl(
     @JavascriptInterface
     override fun getApiBaseUrl(): String {
         return BuildConfig.SERVER_URL
+    }
+
+    @JavascriptInterface
+    override fun saveLoginState(accessToken: String, refreshToken: String, userJson: String) {
+        Log.d(TAG, "JS 请求保存登录态: User=$userJson")
+        try {
+            // 反序列化校验一下数据格式，确保安全
+            val userDto = gson.fromJson(userJson, com.example.roadinspection.data.source.remote.UserDto::class.java)
+            TokenManager.saveLoginSession(accessToken, refreshToken, userDto)
+        } catch (e: Exception) {
+            Log.e(TAG, "保存登录态失败: JSON 解析错误", e)
+        }
+    }
+
+    @JavascriptInterface
+    override fun tryAutoLogin(): String {
+        Log.d(TAG, "JS 请求尝试自动登录")
+        val user = TokenManager.getCachedUser()
+        return if (user != null) {
+            Log.i(TAG, "自动登录成功: ${user.username}")
+            gson.toJson(user)
+        } else {
+            Log.i(TAG, "无有效登录缓存")
+            ""
+        }
+    }
+
+    @JavascriptInterface
+    override fun saveTokens(accessToken: String, refreshToken: String) {
+        Log.d(TAG, "JS 请求保存 Token")
+        TokenManager.saveTokens(accessToken, refreshToken)
+    }
+
+    @JavascriptInterface
+    override fun clearTokens() {
+        Log.d(TAG, "JS 请求清除 Token")
+        TokenManager.clearTokens()
+    }
+
+    @JavascriptInterface
+    override fun getAccessToken(): String {
+        return TokenManager.accessToken ?: ""
     }
 
     @JavascriptInterface
@@ -180,6 +223,86 @@ class AndroidNativeApiImpl(
 
             } catch (e: Exception) {
                 Log.w(TAG, "fetchRecords 流程异常: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * ✅ 原生托管的注销方法
+     * 1. 执行网络请求 (Best Effort)
+     * 2. 强制清除本地 Token
+     * 3. 回调前端 onLogoutComplete
+     */
+    @JavascriptInterface
+    override fun logout() {
+        Log.d(TAG, "JS 请求注销 -> 原生层接管")
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // 1. 调用仓库层执行注销
+                // repository.logoutRemote() 内部已经处理了 try-catch 网络异常
+                // 并保证了 TokenManager.clearTokens() 一定会被执行
+                repository.logoutRemote()
+
+                // 2. 构造成功响应
+                val response = ApiResponse.success<Unit>()
+                val jsonResult = gson.toJson(response)
+
+                // 3. 切换到主线程回调 JS
+                withContext(Dispatchers.Main) {
+                    webViewRef.get()?.invokeJsCallback("onLogoutComplete", jsonResult)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Logout 异常 (不应发生): ${e.message}", e)
+
+                // 即使发生未知崩溃，为了防止用户被困在主页，也必须通知前端登出
+                val errorResponse = ApiResponse.error<Unit>( "强制登出")
+                val jsonResult = gson.toJson(errorResponse)
+
+                withContext(Dispatchers.Main) {
+                    webViewRef.get()?.invokeJsCallback("onLogoutComplete", jsonResult)
+                }
+            }
+        }
+    }
+
+    @JavascriptInterface
+    override fun updateProfile(userId: String, newUsername: String?, newPassword: String?) {
+        Log.d(TAG, "JS 请求更新资料: User=$userId")
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // 1. 调用仓库
+                val userDto = repository.updateProfile(userId, newUsername, newPassword)
+
+                // 2. 构造成功响应
+                val response = ApiResponse(
+                    code = 200,
+                    message = "资料修改成功",
+                    data = userDto
+                )
+                val jsonResult = gson.toJson(response)
+
+                // 3. 回调前端
+                withContext(Dispatchers.Main) {
+                    webViewRef.get()?.invokeJsCallback("onProfileUpdated", jsonResult)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "UpdateProfile 异常: ${e.message}", e)
+
+                // 构造失败响应
+                val errorResponse = ApiResponse<Any>(
+                    code = 500,
+                    message = e.message ?: "更新失败",
+                    data = null
+                )
+                val jsonResult = gson.toJson(errorResponse)
+
+                withContext(Dispatchers.Main) {
+                    webViewRef.get()?.invokeJsCallback("onProfileUpdated", jsonResult)
+                }
             }
         }
     }

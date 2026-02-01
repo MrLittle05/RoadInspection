@@ -30,6 +30,11 @@ export interface User {
   role: "admin" | "inspector";
 }
 
+export interface AuthData extends User {
+  accessToken: string;
+  refreshToken: string;
+}
+
 // Native Response Wrapper
 export interface NativeApiResponse<T> {
   code: number;
@@ -42,6 +47,15 @@ declare global {
   interface Window {
     // 1. Android 注入的方法 (Frontend -> Native)
     AndroidNative: {
+      /**
+       * 触发更新个人资料
+       */
+      updateProfile(
+        userId: string,
+        newUsername: string | null,
+        newPassword: string | null,
+      ): void;
+
       /**
        * 触发获取任务列表
        * @param userId 当前用户ID，原生端根据此ID获取任务
@@ -62,7 +76,38 @@ declare global {
       startInspectionActivity(url: string): void;
 
       getApiBaseUrl(): string;
+
+      /**
+       * 保存登录态 (Token + User)
+       */
+      saveLoginState(
+        accessToken: string,
+        refreshToken: string,
+        userJson: string,
+      ): void;
+
+      /**
+       * 尝试自动登录
+       * @returns JSON 字符串 (User 对象) 或 空字符串
+       */
+      tryAutoLogin(): string;
+
+      /**
+       * 获取当前的 AccessToken (可选，如果前端发请求需要用)
+       */
+      getAccessToken(): string;
+
+      /**
+       * 触发原生端接管的退登流程。
+       * 原生端处理完毕（网络请求+本地清理）后，会调用 window.onLogoutComplete
+       */
+      logout(): void;
     };
+
+    /**
+     * 原生端资料更新完成后的回调
+     */
+    onProfileUpdated?: (response: NativeApiResponse<User>) => void;
 
     // 2. 前端挂载的回调 (Native -> Frontend)
     /**
@@ -76,6 +121,12 @@ declare global {
     onRecordsReceived?: (
       response: NativeApiResponse<InspectionRecord[]>,
     ) => void;
+
+    /**
+     * 原生端用户退登完成后的回调
+     * @param response 包含注销结果（即使网络失败，code 通常也是 200，因为本地注销是强制成功的）
+     */
+    onLogoutComplete?: (response: NativeApiResponse<void>) => void;
   }
 }
 

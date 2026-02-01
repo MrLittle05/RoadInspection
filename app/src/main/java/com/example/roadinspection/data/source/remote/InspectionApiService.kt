@@ -1,29 +1,16 @@
 package com.example.roadinspection.data.source.remote
 
+import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
+import com.example.roadinspection.data.model.ApiResponse
 
 // -------------------------------------------------------------------------
 // Region: 数据传输对象 (DTOs) - 响应模型
 // -------------------------------------------------------------------------
-
-/**
- * 通用 API 响应包装类。
- * 对应后端文档中的标准 JSON 结构。
- *
- * @param T 具体的数据类型 (data 字段的类型)
- */
-data class ApiResponse<T>(
-    val code: Int,      // e.g., 200, 500 [cite: 29]
-    val message: String?, // e.g., "任务创建成功" [cite: 42]
-    val data: T?        // 具体业务数据 (仅 /api/oss/sts 等接口有此字段)
-) {
-    /** 判断请求是否业务成功 */
-    val isSuccess: Boolean
-        get() = code == 200
-}
 
 /**
  * 阿里云 STS 临时凭证数据。
@@ -54,6 +41,12 @@ data class RecordDto(
     val address: String,
     val rawLat: Double,
     val rawLng: Double
+)
+
+data class UserDto(
+    val id: String,
+    val username: String,
+    val role: String
 )
 
 // -------------------------------------------------------------------------
@@ -102,6 +95,33 @@ data class SubmitRecordReq(
     val pavementDistress: String?,
 )
 
+data class UpdateProfileReq(
+    val newUsername: String? = null,
+    val newPassword: String? = null
+)
+
+data class LogoutReq(val refreshToken: String)
+
+// -------------------------------------------------------------------------
+// Region: Auth 相关 DTO
+// -------------------------------------------------------------------------
+
+/**
+ * 刷新 Token 请求体。
+ */
+data class RefreshTokenReq(
+    val refreshToken: String
+)
+
+/**
+ * 刷新 Token 响应体。
+ * 后端返回的 data 字段结构。
+ */
+data class RefreshTokenResp(
+    val accessToken: String,
+    val refreshToken: String // 通常刷新后会连同 Refresh Token 一起更新，实现"滑动过期"
+)
+
 // -------------------------------------------------------------------------
 // Region: Retrofit 接口定义
 // -------------------------------------------------------------------------
@@ -111,6 +131,16 @@ data class SubmitRecordReq(
  * Base URL: http://<服务器IP>:3000 [cite: 15]
  */
 interface InspectionApiService {
+
+    /**
+     * 更新用户信息
+     * (参考 authService.ts 中的 PATCH 逻辑)
+     */
+    @retrofit2.http.PATCH("/api/user/{id}")
+    suspend fun updateProfile(
+        @Path("id") id: String,
+        @Body req: UpdateProfileReq
+    ): ApiResponse<UserDto>
 
     /**
      * 获取 OSS 临时上传凭证 (STS Token)。
@@ -155,4 +185,16 @@ interface InspectionApiService {
      */
     @GET("/api/record/list")
     suspend fun fetchRecords(@Query("taskId") taskId: String): ApiResponse<List<RecordDto>>
+
+    /**
+     * 刷新 Token 接口。
+     * **注意：** 此接口返回值必须是 [Call] 而不是 [suspend]，
+     * 因为 Authenticator 内部必须同步执行网络请求 (Synchronous)，
+     * 且不能使用协程挂起，否则会阻塞 OkHttp 的线程池调度。
+     */
+    @POST("/api/auth/refresh")
+    fun refreshToken(@Body req: RefreshTokenReq): Call<ApiResponse<RefreshTokenResp>>
+
+    @POST("/api/auth/logout")
+    suspend fun logout(@Body req: LogoutReq): ApiResponse<Unit>
 }

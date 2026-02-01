@@ -10,8 +10,25 @@ import android.webkit.JavascriptInterface
 interface AndroidNativeApi {
 
     @JavascriptInterface
+    fun saveLoginState(accessToken: String, refreshToken: String, userJson: String)
+
+    @JavascriptInterface
+    fun tryAutoLogin(): String
+
+    @JavascriptInterface
+    fun updateProfile(userId: String, newUsername: String?, newPassword: String?)
+
+    @JavascriptInterface
     fun getApiBaseUrl(): String
 
+    @JavascriptInterface
+    fun saveTokens(accessToken: String, refreshToken: String)
+
+    @JavascriptInterface
+    fun clearTokens()
+
+    @JavascriptInterface
+    fun getAccessToken(): String
 
     @JavascriptInterface
     fun startInspectionActivity(url: String)
@@ -39,4 +56,7 @@ interface AndroidNativeApi {
 
     @JavascriptInterface
     fun fetchRecords(taskId: String)
+
+    @JavascriptInterface
+    fun logout()
 }

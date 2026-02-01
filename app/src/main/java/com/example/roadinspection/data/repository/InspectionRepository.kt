@@ -5,8 +5,13 @@ import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
 import com.example.roadinspection.data.source.local.InspectionTask
+import com.example.roadinspection.data.source.local.TokenManager
+import com.example.roadinspection.data.source.remote.LogoutReq
 import com.example.roadinspection.data.source.remote.TaskDto
 import com.example.roadinspection.data.source.remote.RecordDto
+import com.example.roadinspection.data.source.remote.UpdateProfileReq
+import com.example.roadinspection.data.source.remote.UserDto
+import com.example.roadinspection.di.NetworkModule
 import com.example.roadinspection.di.NetworkModule.api
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -256,6 +261,43 @@ class InspectionRepository(private val dao: InspectionDao) {
             // 网络错误是预料之中的（如离线模式），打印日志即可，不要崩 UI
             android.util.Log.w("InspectionRepo", "后台同步记录失败: ${e.message}")
         }
+    }
+
+    /**
+     * 更新个人资料
+     */
+    suspend fun updateProfile(userId: String, newUsername: String?, newPassword: String?): UserDto? {
+        // 构建请求体
+        val req = UpdateProfileReq(newUsername, newPassword)
+
+        // 发起请求
+        val response = api.updateProfile(userId, req)
+
+        if (response.isSuccess) {
+            return response.data
+        } else {
+            throw Exception(response.message)
+        }
+    }
+
+    /**
+     * ✅ 用户退出登录
+     * 1. 尝试通知服务器注销 (Best Effort)
+     * 2. 无论成功失败，都必须清除本地 Token
+     */
+    suspend fun logoutRemote() {
+        val refreshToken = TokenManager.refreshToken
+        if (!refreshToken.isNullOrEmpty()) {
+            try {
+                // 调用后端注销接口
+                api.logout(LogoutReq(refreshToken))
+            } catch (e: Exception) {
+                // 网络失败也不要在意，重点是本地要清掉
+                android.util.Log.w("Repo", "注销请求发送失败: ${e.message}")
+            }
+        }
+        // 清除本地凭证
+       TokenManager.clearTokens()
     }
 }
 

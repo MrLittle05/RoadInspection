@@ -43,6 +43,9 @@ const userSchema = new Schema(
     // 软删除字段
     // null = 有效用户; 有日期 = 已删除用户
     deletedAt: { type: Date, default: null },
+
+    // 用于服务端比对和注销
+    refreshToken: { type: String, select: false },
   },
   {
     // 自动管理 createdAt 和 updatedAt 字段

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Toast, ToastType } from "./components/Toast";
 // import { mockAuthService } from "./services/mockAuth";
 import { authService } from "./services/authService";
-import { setupMockAndroidBridge } from "./services/mockData";
 import {
   InspectionRecord,
   InspectionTask,
@@ -63,7 +62,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     // [MOCK ONLY] Initialize Mock Bridge.
-    setupMockAndroidBridge();
+    // setupMockAndroidBridge();
 
     // [KEEP IN PRODUCTION] Register Global Callbacks for Native Bridge
     window.onTasksReceived = (
@@ -75,16 +74,16 @@ const App: React.FC = () => {
         setTasks(response.data);
       }
 
-      const isLocalData = response.msg.includes("本地");
+      // const isLocalData = response.msg.includes("本地");
 
       if (response.code === 200) {
-        if (!isLocalData) {
-          // Server data received
-          setSyncResult({ type: "success", message: "列表已更新" });
-          setIsSyncing(false);
-        } else {
-          // Local data, keep loading
-        }
+        // if (!isLocalData) {
+        // Server data received
+        setSyncResult({ type: "success", message: "列表已更新" });
+        setIsSyncing(false);
+        // } else {
+        //   // Local data, keep loading
+        // }
       } else {
         // Error case
         console.warn("⚠️ [App] Native fetchTasks warning:", response.msg);
@@ -102,13 +101,13 @@ const App: React.FC = () => {
         setTaskRecords(response.data);
       }
 
-      const isLocalData = response.msg.includes("本地");
+      // const isLocalData = response.msg.includes("本地");
 
       if (response.code === 200) {
-        if (!isLocalData) {
-          setSyncResult({ type: "success", message: "记录已更新" });
-          setIsSyncing(false);
-        }
+        // if (!isLocalData) {
+        setSyncResult({ type: "success", message: "记录已更新" });
+        setIsSyncing(false);
+        // }
       } else {
         console.warn("⚠️ [App] Native fetchRecords warning:", response.msg);
         setSyncResult({ type: "error", message: "同步失败" });
@@ -116,10 +115,61 @@ const App: React.FC = () => {
       }
     };
 
+    window.onLogoutComplete = (response: NativeApiResponse<void>) => {
+      console.log("🔒 [App] Native logout complete:", response.msg);
+
+      // 1. 清空 React 全局状态
+      setCurrentUser(null);
+      setTasks([]);
+      setTaskRecords([]);
+      setSyncResult(null);
+
+      // 2. 路由跳转
+      setCurrentView(ViewState.LOGIN);
+
+      // 3. 提示用户
+      if (response.code === 200) {
+        showToast("已退出", "您已安全退出登录", "success");
+      } else {
+        // 这种情况理论上很少见，因为本地清理通常是强制成功的
+        showToast("已退出", "离线模式强制登出", "info");
+      }
+    };
+
+    window.onProfileUpdated = (response: NativeApiResponse<User>) => {
+      console.log("👤 [App] Native onProfileUpdated:", response.msg);
+
+      if (response.code === 200 && response.data) {
+        // 更新本地用户状态
+        setCurrentUser(response.data);
+        showToast("修改成功", "个人资料已更新", "success");
+      } else {
+        showToast("修改失败", response.msg || "未知错误", "error");
+      }
+    };
+
+    let cachedUserStr = "";
+    cachedUserStr = window.AndroidNative.tryAutoLogin();
+
+    if (cachedUserStr) {
+      try {
+        const user = JSON.parse(cachedUserStr) as User;
+        console.log("🚀 [App] 自动登录成功:", user.username);
+
+        // 恢复状态
+        setCurrentUser(user);
+        setCurrentView(ViewState.LIST);
+      } catch (e) {
+        console.error("自动登录数据解析失败", e);
+      }
+    }
+
     // Cleanup (optional)
     return () => {
       window.onTasksReceived = undefined;
       window.onRecordsReceived = undefined;
+      window.onLogoutComplete = undefined;
+      window.onProfileUpdated = undefined;
     };
   }, []);
 
@@ -168,56 +218,137 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (u: string, p: string) => {
+    // 1. 发起网络请求
     const res = await authService.login(u, p);
+
+    // 2. 校验响应结果
     if (res.code === 200 && res.data) {
-      setCurrentUser(res.data);
+      const authData = res.data;
+
+      // 3. 构造纯净的用户对象
+      const user: User = {
+        id: authData.id,
+        username: authData.username,
+        role: authData.role,
+      };
+
+      // 4. 更新 React 全局状态
+      setCurrentUser(user);
+
+      // 5. 调用 Android 原生接口保存完整会话信息
+      // 传入: AccessToken, RefreshToken, User对象(JSON字符串)
+      if (window.AndroidNative && window.AndroidNative.saveLoginState) {
+        console.log(
+          "📥 [App] Login Success: Saving session to Native Layer...",
+        );
+        window.AndroidNative.saveLoginState(
+          authData.accessToken,
+          authData.refreshToken,
+          JSON.stringify(user),
+        );
+      } else {
+        // 生产环境如果缺失 Bridge 接口，属于严重异常
+        console.error("❌ [App] Critical: AndroidNative interface not found!");
+        showToast("环境异常", "无法与原生应用通信，请联系管理员", "error");
+        // 虽然 UI 状态更新了，但无法持久化，下次启动会失效
+      }
+
+      // 6. 路由跳转与反馈
       setCurrentView(ViewState.LIST);
-      showToast("登录成功", `欢迎回来, ${res.data.username}`, "success");
+      showToast("登录成功", `欢迎回来, ${authData.username}`, "success");
       return true;
     } else {
+      // 登录失败处理
+      console.warn(`⚠️ [App] Login Failed: ${res.message}`);
       showToast("登录失败", res.message, "error");
       return false;
     }
   };
 
   const handleRegister = async (u: string, p: string) => {
+    // 1. 发起网络请求
     const res = await authService.register(u, p);
+
+    // 2. 校验响应结果
     if (res.code === 200 && res.data) {
-      setCurrentUser(res.data);
+      const authData = res.data;
+
+      // 3. 构造用户对象
+      const user: User = {
+        id: authData.id,
+        username: authData.username,
+        role: authData.role,
+      };
+
+      // 4. 更新 React 全局状态
+      setCurrentUser(user);
+
+      // 5. 调用 Android 原生接口保存完整会话信息
+      // 注册成功后直接进入应用，无需再次登录
+      if (window.AndroidNative && window.AndroidNative.saveLoginState) {
+        console.log(
+          "📥 [App] Register Success: Saving session to Native Layer...",
+        );
+        window.AndroidNative.saveLoginState(
+          authData.accessToken,
+          authData.refreshToken,
+          JSON.stringify(user),
+        );
+      } else {
+        console.error("❌ [App] Critical: AndroidNative interface not found!");
+        showToast("环境异常", "无法与原生应用通信", "error");
+      }
+
+      // 6. 路由跳转与反馈
       setCurrentView(ViewState.LIST);
-      showToast("注册成功", `欢迎加入, ${res.data.username}`, "success");
+      showToast("注册成功", `欢迎加入, ${authData.username}`, "success");
       return true;
     } else {
+      // 注册失败处理
+      console.warn(`⚠️ [App] Register Failed: ${res.message}`);
       showToast("注册失败", res.message, "error");
       return false;
     }
   };
 
   const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentView(ViewState.LOGIN);
-    setTasks([]);
-    setTaskRecords([]);
-    showToast("已退出", "您已安全退出登录", "info");
+    showToast("正在退出...", "正在清理安全凭证", "info");
+
+    if (window.AndroidNative && window.AndroidNative.logout) {
+      // 正式环境：移交 Native 托管
+      window.AndroidNative.logout();
+    } else {
+      // 浏览器调试环境 (Fallback)
+      // 模拟 Native 的回调行为，方便在 Chrome 里调试业务流程
+      console.warn("⚠️ [App] Browser Env: Simulating Native Logout");
+      localStorage.clear();
+
+      // 模拟异步回调
+      setTimeout(() => {
+        if (window.onLogoutComplete) {
+          window.onLogoutComplete({
+            code: 200,
+            msg: "Browser Local Logout",
+            data: undefined,
+          });
+        }
+      }, 500);
+    }
   };
 
-  const handleUpdateProfile = async (
-    newUsername?: string,
-    newPassword?: string,
-  ) => {
+  const handleUpdateProfile = (newUsername?: string, newPassword?: string) => {
     if (!currentUser) return false;
-    const res = await authService.updateProfile(
-      currentUser.id,
-      newUsername,
-      newPassword,
-    );
-    if (res.code === 200 && res.data) {
-      setCurrentUser(res.data);
-      showToast("修改成功", "个人资料已更新", "success");
+
+    // 参数归一化：将 undefined 转为 null 传给 Kotlin
+    const uName = newUsername || null;
+    const pwd = newPassword || null;
+
+    if (window.AndroidNative && window.AndroidNative.updateProfile) {
+      window.AndroidNative.updateProfile(currentUser.id, uName, pwd);
+      // 注意：这里不能立马返回 true/false，因为是异步的。
+      // UI 层（UserCenterView）可能需要调整 Loading 状态的逻辑，
+      // 或者我们可以简单地让 Modal 保持打开，直到收到 Toast。
       return true;
-    } else {
-      showToast("修改失败", res.message, "error");
-      return false;
     }
   };
 

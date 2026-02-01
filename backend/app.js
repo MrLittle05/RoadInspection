@@ -10,6 +10,7 @@
  */
 
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import Koa from "koa";
 import bodyParser from "koa-bodyparser";
 import Router from "koa-router";
@@ -63,64 +64,58 @@ app.use(async (ctx, next) => {
 app.use(bodyParser()); // 解析 JSON Body
 
 /**
- * 全局身份鉴权中间件
+ * JWT Authentication Middleware (全局鉴权中间件)
  * @description
- * 拦截除“白名单”外的所有请求，校验 JWT Token 有效性。
- * 校验通过会将用户信息挂载到 ctx.state.user，供下游路由使用。
+ * 1. 拦截非白名单请求。
+ * 2. 验证 Access Token 有效性。
+ * 3. 处理过期 (401) 与 无效 (403) 两种情况，供前端区分处理。
  */
 app.use(async (ctx, next) => {
-  // ----------------------------------------------------------
-  // TODO: [配置] 后续请将密钥移入 config.js 文件，并使用更复杂的随机字符串
-  // ----------------------------------------------------------
-  const JWT_SECRET = "temporary_secret_key_change_me_later";
+  // 1. 定义白名单 (无需登录即可访问的接口)
+  // 注意：/api/auth/refresh 也必须在白名单中，因为它是用来换取新 Token 的，
+  // 调用它时 Access Token 通常已经过期了。
+  const whiteList = [
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/refresh",
+    "/favicon.ico",
+  ];
 
-  // 1. 定义白名单
-  const whiteList = ["/api/auth/login", "/api/auth/register", "/favicon.ico"];
-
-  // 如果请求路径在白名单中，直接放行
   if (whiteList.includes(ctx.path)) {
     return await next();
   }
 
-  // 2. 获取 Authorization Header
-  // 约定前端 Header 格式为: "Authorization: Bearer <token_string>"
+  // 2. 提取 Token
   const authHeader = ctx.header.authorization;
+  if (!authHeader) {
+    ctx.status = 401;
+    ctx.body = { code: 401, message: "未提供认证令牌" };
+    return;
+  }
 
-  // if (!authHeader) {
-  //   console.warn(`⛔ [Auth] 拦截未授权访问: ${ctx.path}`);
-  //   ctx.status = 401;
-  //   ctx.body = { code: 401, message: "未登录或 Token 缺失" };
-  //   return;
-  // }
+  const token = authHeader.split(" ")[1]; // Remove "Bearer " prefix
 
-  // 3. 提取并验证 Token
   try {
-    // split(' ')[1] 是为了去掉前缀 "Bearer "
-    // const token = authHeader.split(" ")[1];
+    // 3. 验证 Access Token
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
 
-    // if (!token) {
-    //   throw new Error("Token 格式错误");
-    // }
-
-    // 验证 Token (如果过期或被篡改，verify 会抛出异常)
-    // const decoded = jwt.verify(token, JWT_SECRET);
-
-    // 4. 挂载用户信息
-    // 成功后，后续路由可以通过 ctx.state.user 获取当前用户 ID 和 Role
-    // ctx.state.user = decoded;
-
-    // TODO: [可选] 这里可以添加检查用户是否被封禁的逻辑 (需查库，会有性能损耗)
+    // 4. 挂载用户信息到 Context
+    ctx.state.user = decoded;
 
     await next(); // 验证通过，放行
   } catch (err) {
-    // 区分 Token 过期还是 Token 无效
-    const isExpired = err.name === "TokenExpiredError";
-    const msg = isExpired ? "登录已过期，请重新登录" : "Token 无效或非法";
-
-    console.warn(`⛔ [Auth] 鉴权失败 (${err.name}): ${ctx.path}`);
-
-    ctx.status = 401;
-    ctx.body = { code: 401, message: msg };
+    // 5. 错误区分处理
+    if (err.name === "TokenExpiredError") {
+      // ✅ 关键：返回 401，告诉前端/Android端 Access Token 过期了，
+      // Android 的 Authenticator 会捕获这个 401 并触发刷新逻辑。
+      ctx.status = 401;
+      ctx.body = { code: 401, message: "TokenExpired" };
+    } else {
+      // 其他错误（被篡改、格式错误），返回 403 禁止访问，前端应强制登出
+      console.warn(`⛔ 非法 Token 访问: ${ctx.path}`);
+      ctx.status = 403;
+      ctx.body = { code: 403, message: "TokenInvalid" };
+    }
   }
 });
 
@@ -152,7 +147,36 @@ connect(mongoUrl, {
   });
 
 // ============================================================
-// 3. API Routes (业务路由)
+// 3. Helper Functions (工具函数)
+// ============================================================
+
+/**
+ * 生成双 Token
+ * @param {Object} user - 用户文档对象
+ * @returns {Object} { accessToken, refreshToken }
+ */
+const generateTokens = (user) => {
+  // Access Token: 包含业务所需的常用字段 (ID, Role)
+  const accessToken = jwt.sign(
+    { id: user.id, role: user.role, username: user.username },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: process.env.ACCESS_TOKEN_EXPIRES },
+  );
+
+  // Refresh Token: 仅包含 ID，用于查库验证
+  const refreshToken = jwt.sign(
+    { id: user.id },
+    process.env.JWT_REFRESH_SECRET,
+    {
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRES,
+    },
+  );
+
+  return { accessToken, refreshToken };
+};
+
+// ============================================================
+// 4. API Routes (业务路由)
 // ============================================================
 
 // ============================================================
@@ -161,119 +185,100 @@ connect(mongoUrl, {
 
 /**
  * @route POST /api/auth/register
- * @summary 用户注册
- * @description
- * 1. 校验用户名是否已存在
- * 2. 对密码进行 BCrypt 哈希加密
- * 3. 创建用户文档
+ * @summary 注册并直接返回 Token (注册即登录)
  */
 router.post("/api/auth/register", async (ctx) => {
   const { username, password, role } = ctx.request.body;
 
-  // 1. 基础参数校验
   if (!username || !password) {
     ctx.status = 400;
-    ctx.body = { code: 400, message: "用户名和密码不能为空" };
+    ctx.body = { code: 400, message: "参数不完整" };
     return;
   }
 
-  console.log(`👤 [Auth Register] 收到注册请求: ${username}`);
-
   try {
-    // 2. 检查用户名是否已存在
     const existingUser = await User.findOne({ username });
     if (existingUser) {
-      console.warn(`⚠️ [Auth Register] 用户名已存在: ${username}`);
       ctx.status = 409;
-      ctx.body = { code: 409, message: "用户名已被占用" }; // 409 Conflict
+      ctx.body = { code: 409, message: "用户名已被占用" };
       return;
     }
 
-    // 3. 密码加密 (Salt Rounds = 10)
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 4. 创建用户
     const newUser = new User({
       username,
       hashedPassword,
-      role: role || "inspector", // 默认为巡检员
+      role: role || "inspector",
     });
+
+    // 生成 Token
+    const tokens = generateTokens(newUser);
+    // 保存 Refresh Token 到数据库 (用于后续验证和注销)
+    newUser.refreshToken = tokens.refreshToken;
 
     await newUser.save();
 
-    console.log(`✅ [Auth Register] 用户注册成功: ${newUser.id}`);
+    console.log(`✅ 用户注册成功: ${newUser.username}`);
 
     ctx.body = {
       code: 200,
       message: "注册成功",
-      // 返回基本信息，注意：User 模型配置了 transform，会自动包含 id，隐藏 _id
       data: {
         id: newUser.id,
         username: newUser.username,
         role: newUser.role,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       },
     };
   } catch (e) {
-    console.error(`❌ [Auth Register] 注册失败:`, e);
+    console.error(e);
     ctx.status = 500;
-    ctx.body = { code: 500, message: "注册失败，服务器内部错误" };
+    ctx.body = { code: 500, message: "注册失败" };
   }
 });
 
 /**
  * @route POST /api/auth/login
- * @summary 用户登录
- * @description
- * 验证用户名密码，返回用户 ID 给移动端暂存。
- * 后续移动端在上传 Task 时，需将此 ID 填入 inspectorId 字段。
+ * @summary 登录并下发双 Token
  */
 router.post("/api/auth/login", async (ctx) => {
   const { username, password } = ctx.request.body;
 
-  if (!username || !password) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: "请输入用户名和密码" };
-    return;
-  }
-
-  console.log(`🔐 [Auth Login] 尝试登录: ${username}`);
-
   try {
-    // 1. 查找用户
-    //  .select('+hashedPassword') 才能将user的hashedPassward取出。
     const user = await User.findOne({ username }).select("+hashedPassword");
 
-    // 2. 账号不存在校验
     if (!user) {
-      console.warn(`⚠️ [Auth Login] 用户不存在: ${username}`);
       ctx.status = 401;
       ctx.body = { code: 401, message: "用户名或密码错误" };
       return;
     }
 
-    // 3. 软删除校验 (离职员工禁止登录)
     if (user.deletedAt) {
-      console.warn(`⛔ [Auth Login] 已离职用户尝试登录: ${username}`);
       ctx.status = 403;
       ctx.body = { code: 403, message: "账号已停用" };
       return;
     }
 
-    // 4. 密码比对
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) {
-      console.warn(`⚠️ [Auth Login] 密码错误: ${username}`);
       ctx.status = 401;
       ctx.body = { code: 401, message: "用户名或密码错误" };
       return;
     }
 
-    console.log(`✅ [Auth Login] 登录成功: ${user.id} (${user.role})`);
+    // ✅ 登录成功，签发 Token
+    const tokens = generateTokens(user);
 
-    // 5. 返回结果
-    // 目前阶段：直接返回 User ID 给安卓端保存
-    // 未来阶段：这里会改为生成 JWT Token 返回
+    // ✅ 将 Refresh Token 更新到数据库 (覆盖旧的，实现单点登录效果)
+    // 如果需要支持多设备同时登录，这里需要改为数组存储 [token1, token2...]
+    user.refreshToken = tokens.refreshToken;
+    await user.save(); // 使用 save 触发 schema 校验，或使用 updateOne
+
+    console.log(`✅ [Login] 用户登录: ${username}`);
+
     ctx.body = {
       code: 200,
       message: "登录成功",
@@ -281,13 +286,131 @@ router.post("/api/auth/login", async (ctx) => {
         id: user.id,
         username: user.username,
         role: user.role,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       },
     };
   } catch (e) {
-    console.error(`❌ [Auth Login] 登录异常:`, e);
+    console.error(e);
     ctx.status = 500;
-    ctx.body = { code: 500, message: "登录服务异常" };
+    ctx.body = { code: 500, message: "登录异常" };
   }
+});
+
+/**
+ * @route POST /api/auth/refresh
+ * @summary 刷新 Token (Exchange Refresh Token for new Pair)
+ * @description
+ * 客户端 Access Token 过期后 (401)，调用此接口换取新 Token。
+ * 采用了 "Token Rotation" 策略：刷新后，旧的 Refresh Token 作废，颁发全新的。
+ */
+router.post("/api/auth/refresh", async (ctx) => {
+  const { refreshToken } = ctx.request.body;
+
+  if (!refreshToken) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "Refresh Token 缺失" };
+    return;
+  }
+
+  try {
+    // 1. 验证 Refresh Token 签名
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const userId = decoded.id;
+
+    // 2. 数据库比对 (防盗用核心检查)
+    // 检查前端传来的 Refresh Token 是否与数据库中存储的一致
+    // select('+refreshToken') 因为该字段通常设为 select: false
+    const user = await User.findById(userId).select("+refreshToken");
+
+    if (!user || user.refreshToken !== refreshToken) {
+      console.warn(`⛔ [Risk] Refresh Token 重放或已失效: User=${userId}`);
+      // 如果 Token 不匹配，说明可能该 Token 已被使用过（或者用户已注销）
+      // 此时应视为安全风险，强制前端登出
+      ctx.status = 403;
+      ctx.body = { code: 403, message: "无效的刷新令牌，请重新登录" };
+      return;
+    }
+
+    // 3. 签发新的双 Token (Rotation)
+    const newTokens = generateTokens(user);
+
+    // 4. 更新数据库，废弃旧的 Refresh Token
+    user.refreshToken = newTokens.refreshToken;
+    await user.save();
+
+    console.log(`🔄 [Refresh] Token 刷新成功: ${user.username}`);
+
+    ctx.body = {
+      code: 200,
+      message: "Token 刷新成功",
+      data: {
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken,
+      },
+    };
+  } catch (err) {
+    // Refresh Token 过期或格式错误
+    console.warn(`❌ [Refresh] 刷新失败: ${err.message}`);
+    ctx.status = 403; // 返回 403 触发前端强制登出
+    ctx.body = { code: 403, message: "登录凭证已过期，请重新登录" };
+  }
+});
+
+/**
+ * @route POST /api/auth/logout
+ * @summary 退出登录
+ * @description
+ * 安全的注销逻辑：
+ * 1. 优先从 Access Token 获取身份。
+ * 2. 如果 Access Token 失效，则校验 Body 中的 Refresh Token 获取身份。
+ * 3. 两者都无效，则认为用户已经离线，直接返回成功 (前端自行清除本地缓存即可)。
+ */
+router.post("/api/auth/logout", async (ctx) => {
+  let userId;
+
+  // ---------------------------------------------------------
+  // 方式 A: 从 Access Token 解析 (由鉴权中间件 ctx.state.user 提供)
+  // ---------------------------------------------------------
+  if (ctx.state.user && ctx.state.user.id) {
+    userId = ctx.state.user.id;
+  }
+
+  // ---------------------------------------------------------
+  // 方式 B: Access Token 已过期，尝试验证 Body 里的 Refresh Token
+  // ---------------------------------------------------------
+  else {
+    const { refreshToken } = ctx.request.body;
+    if (refreshToken) {
+      try {
+        // 关键步骤：验证 Token 签名，防止伪造 ID
+        // 这里使用之前定义的 JWT_REFRESH_SECRET
+        const decoded = jwt.verify(
+          refreshToken,
+          process.env.JWT_REFRESH_SECRET ||
+            "road_inspection_refresh_secret_secure_key",
+        );
+        userId = decoded.id;
+      } catch (e) {
+        console.warn(`⚠️ [Logout] 无效的 Refresh Token，无法在服务端注销`);
+        // Token 既然是假的或过期的，说明服务端本来就无法刷新，视作"已注销"即可
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 执行注销操作
+  // ---------------------------------------------------------
+  if (userId) {
+    console.log(`👋 [Logout] 用户离线: ${userId}`);
+    // 核心操作：将数据库中的 refreshToken 置空，断绝其刷新后路
+    await User.updateOne({ _id: userId }, { $set: { refreshToken: null } });
+  } else {
+    console.log(`👋 [Logout] 本地注销 (服务端未识别身份或已过期)`);
+  }
+
+  // 无论服务端是否执行了 DB 操作，对前端来说结果都是"已退出"
+  ctx.body = { code: 200, message: "已退出登录" };
 });
 
 /**
@@ -363,7 +486,7 @@ router.patch("/api/user/:id", async (ctx) => {
     // 使用 save() 而不是 updateOne()，是为了触发 Mongoose 可能存在的 pre-save 钩子 (虽然目前你的 model 没写，但这是好习惯)
     await user.save();
 
-    console.log(`✅ [User Update] 修改成功: ${userId}`);
+    console.log(`✅ [User Update] 修改成功: User=${userId}`);
 
     ctx.body = {
       code: 200,

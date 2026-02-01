@@ -1,4 +1,4 @@
-import { User } from "../types";
+import { NativeApiResponse, User, AuthData } from "../types";
 
 const API_BASE_URL =
   window.AndroidNative.getApiBaseUrl() || "http://localhost:3000";
@@ -69,7 +69,7 @@ export const authService = {
   login: async (
     username: string,
     password: string,
-  ): Promise<ApiResponse<User>> => {
+  ): Promise<ApiResponse<AuthData>> => {
     try {
       const res = await fetchWithTimeout("/api/auth/login", {
         method: "POST",
@@ -91,35 +91,11 @@ export const authService = {
   register: async (
     username: string,
     password: string,
-  ): Promise<ApiResponse<User>> => {
+  ): Promise<ApiResponse<AuthData>> => {
     try {
       const res = await fetchWithTimeout("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({ username, password, role: "inspector" }),
-      });
-      return res;
-    } catch (error: any) {
-      return { code: 500, message: error.message };
-    }
-  },
-
-  /**
-   * 更新个人资料
-   * @route PATCH /api/user/:id
-   */
-  updateProfile: async (
-    id: string,
-    newUsername?: string,
-    newPassword?: string,
-  ): Promise<ApiResponse<User>> => {
-    try {
-      const body: any = {};
-      if (newUsername) body.newUsername = newUsername;
-      if (newPassword) body.newPassword = newPassword;
-
-      const res = await fetchWithTimeout(`/api/user/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
       });
       return res;
     } catch (error: any) {
