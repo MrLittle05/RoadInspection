@@ -26,7 +26,6 @@ object WorkManagerConfig {
         // 1. 定义约束条件：必须有网络连接
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
-            // .setRequiresBatteryNotLow(true) // 可选：电量充足
             .build()
 
         // 2. 构建任务请求

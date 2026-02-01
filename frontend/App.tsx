@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Toast, ToastType } from "./components/Toast";
-import { mockAuthService } from "./services/mockAuth";
+// import { mockAuthService } from "./services/mockAuth";
+import { authService } from "./services/authService";
 import { setupMockAndroidBridge } from "./services/mockData";
 import {
   InspectionRecord,
@@ -167,7 +168,7 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (u: string, p: string) => {
-    const res = await mockAuthService.login(u, p);
+    const res = await authService.login(u, p);
     if (res.code === 200 && res.data) {
       setCurrentUser(res.data);
       setCurrentView(ViewState.LIST);
@@ -180,7 +181,7 @@ const App: React.FC = () => {
   };
 
   const handleRegister = async (u: string, p: string) => {
-    const res = await mockAuthService.register(u, p);
+    const res = await authService.register(u, p);
     if (res.code === 200 && res.data) {
       setCurrentUser(res.data);
       setCurrentView(ViewState.LIST);
@@ -205,7 +206,7 @@ const App: React.FC = () => {
     newPassword?: string,
   ) => {
     if (!currentUser) return false;
-    const res = await mockAuthService.updateProfile(
+    const res = await authService.updateProfile(
       currentUser.id,
       newUsername,
       newPassword,

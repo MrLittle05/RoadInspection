@@ -120,6 +120,10 @@ const recordSchema = new Schema({
   // 原始经纬度备份
   rawLat: { type: Number, required: true },
   rawLng: { type: Number, required: true },
+
+  iri: { type: Number, default: null },
+
+  pavementDistress: { type: String, default: null },
 });
 
 // 创建 2dsphere 空间索引 (支持 $near, $geoWithin 查询)

@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,6 +22,19 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val localProperties = Properties()
+        val localFile = rootProject.file("local.properties")
+
+        if (localFile.exists()) {
+            localProperties.load(FileInputStream(localFile))
+        }
+
+        // 获取定义的 URL
+        val serverUrl = localProperties.getProperty("server.url", "\"http://localhost:3000\"")
+
+        // 生成 BuildConfig
+        buildConfigField("String", "SERVER_URL", serverUrl)
     }
 
     signingConfigs {
@@ -50,6 +66,7 @@ android {
         jvmTarget = "11"
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 }

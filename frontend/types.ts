@@ -60,6 +60,8 @@ declare global {
        * @param url 巡检页面路径及路径参数
        */
       startInspectionActivity(url: string): void;
+
+      getApiBaseUrl(): string;
     };
 
     // 2. 前端挂载的回调 (Native -> Frontend)

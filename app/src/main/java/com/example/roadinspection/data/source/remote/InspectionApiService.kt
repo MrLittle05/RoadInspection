@@ -97,7 +97,9 @@ data class SubmitRecordReq(
     val latitude: Double,
     val longitude: Double,
     val address: String?,  // 逆地理编码地址 (可选)
-    val captureTime: Long
+    val captureTime: Long,
+    val iri: Double?,
+    val pavementDistress: String?,
 )
 
 // -------------------------------------------------------------------------

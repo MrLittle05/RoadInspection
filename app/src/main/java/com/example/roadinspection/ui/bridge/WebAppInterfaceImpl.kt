@@ -7,6 +7,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
+import com.example.roadinspection.BuildConfig
 import com.example.roadinspection.data.model.ApiResponse
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.domain.inspection.InspectionManager
@@ -51,6 +52,11 @@ class AndroidNativeApiImpl(
     private var currentTasksJob: Job? = null
     // 用于追踪当前的 fetchRecords 任务
     private var currentRecordsJob: Job? = null
+
+    @JavascriptInterface
+    override fun getApiBaseUrl(): String {
+        return BuildConfig.SERVER_URL
+    }
 
     @JavascriptInterface
     override fun startInspectionActivity(url: String) {

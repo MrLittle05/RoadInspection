@@ -291,6 +291,97 @@ router.post("/api/auth/login", async (ctx) => {
 });
 
 /**
+ * @route PATCH /api/user/:id
+ * @summary 修改用户信息 (用户名或密码)
+ * @description
+ * 采用 Partial Update 策略：
+ * 1. 如果只传 newUsername，仅修改用户名（会校验唯一性）。
+ * 2. 如果只传 newPassword，仅修改密码（会自动加盐哈希）。
+ * 3. 两个都传，则同时修改。
+ * * @param {string} id - URL路径参数，目标用户的 ID
+ * @param {string} [newUsername] - 新用户名 (可选)
+ * @param {string} [newPassword] - 新密码 (可选)
+ */
+router.patch("/api/user/:id", async (ctx) => {
+  const userId = ctx.params.id;
+  const { newUsername, newPassword } = ctx.request.body;
+
+  // 1. 参数防御：确保至少有一个参数需要修改
+  if (!newUsername && !newPassword) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "请提供需要修改的用户名或密码" };
+    return;
+  }
+
+  console.log(`🔧 [User Update] 收到修改请求: User=${userId}`);
+
+  try {
+    // 2. 查找目标用户
+    const user = await User.findById(userId);
+    if (!user) {
+      console.warn(`⚠️ [User Update] 用户不存在: ${userId}`);
+      ctx.status = 404;
+      ctx.body = { code: 404, message: "用户不存在" };
+      return;
+    }
+
+    // 3. 处理用户名修改
+    if (newUsername) {
+      // 检查是否与当前一致（避免无意义的数据库查重）
+      if (newUsername !== user.username) {
+        // 检查唯一性：查看是否有“别人”用了这个名字
+        // $ne (Not Equal) 排除了当前用户自己
+        const existingUser = await User.findOne({
+          username: newUsername,
+          _id: { $ne: userId },
+        });
+
+        if (existingUser) {
+          ctx.status = 409;
+          ctx.body = { code: 409, message: "该用户名已被其他人占用" };
+          return;
+        }
+
+        console.log(
+          `📝 [User Update] 更新用户名: ${user.username} -> ${newUsername}`,
+        );
+        user.username = newUsername;
+      }
+    }
+
+    // 4. 处理密码修改
+    if (newPassword) {
+      // 只有当提供了新密码时，才进行昂贵的哈希计算
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+      console.log(`🔐 [User Update] 更新密码: User=${userId}`);
+      user.hashedPassword = hashedPassword;
+    }
+
+    // 5. 保存更改
+    // 使用 save() 而不是 updateOne()，是为了触发 Mongoose 可能存在的 pre-save 钩子 (虽然目前你的 model 没写，但这是好习惯)
+    await user.save();
+
+    console.log(`✅ [User Update] 修改成功: ${userId}`);
+
+    ctx.body = {
+      code: 200,
+      message: "用户信息更新成功",
+      data: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+    };
+  } catch (e) {
+    console.error(`❌ [User Update] 修改失败:`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "更新用户信息失败" };
+  }
+});
+
+/**
  * @route GET /api/oss/sts
  * @summary 获取阿里云 OSS 临时上传凭证 (STS Token)
  * @description Android 端上传文件前，必须先调用此接口获取临时权限。
@@ -391,6 +482,9 @@ router.post("/api/record/submit", async (ctx) => {
     // 冗余存储原始经纬度，作为 "冷备" 数据，防止 GeoJSON 解析出问题时无据可查
     rawLat: body.latitude,
     rawLng: body.longitude,
+
+    iri: body.iri ?? null,
+    pavementDistress: body.pavementDistress ?? null,
 
     // GeoJSON Point 对象
     // ⚠️ 严正注意：MongoDB/GeoJSON 规范经纬度顺序为 [经度(Lng), 纬度(Lat)]
@@ -553,11 +647,12 @@ export { app };
 // 只有当文件直接被运行时，才启动服务器
 if (process.env.NODE_ENV !== "test") {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
+  const HOST = process.env.HOST || "0.0.0.0";
+  app.listen(PORT, HOST, () => {
     console.log(`
 🚀 Road Inspection Server Running...
 -----------------------------------
-📡 Local:   http://localhost:${PORT}
+📡 Local:   http://${HOST}:${PORT}
 💾 DB:      MongoDB Atlas
 ☁️ Cloud:   Aliyun OSS (Shanghai)
 -----------------------------------

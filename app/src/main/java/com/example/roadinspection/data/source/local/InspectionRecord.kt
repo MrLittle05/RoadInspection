@@ -77,5 +77,24 @@ data class InspectionRecord(
     val longitude: Double,
 
     /** 逆地理编码后的地址字符串 (例如 "xx路xx号") */
-    val address: String? = null
+    val address: String? = null,
+
+    /**
+     * 国际平整度指数 (International Roughness Index).
+     *
+     * 用于量化路面平整度的数值指标。
+     * 如果尚未计算或未分析，该值可能为 null。
+     */
+    @ColumnInfo(name = "iri")
+    val iri: Double? = null,
+
+    /**
+     * 路面病害类型 (原始存储字段).
+     *
+     * 为了避免使用 TypeConverter，此处直接存储为逗号分隔的字符串。
+     * 例如: "裂缝,坑槽,网裂"
+     * 对应 TypeScript 定义中的 pavementDistress: string[]
+     */
+    @ColumnInfo(name = "pavement_distress")
+    val pavementDistress: String? = null
 )

@@ -122,8 +122,10 @@ class UploadWorker(
                             latitude = currentRecord.latitude,
                             longitude = currentRecord.longitude,
                             address = currentRecord.address,
-                            captureTime = currentRecord.captureTime
-                        ) //
+                            captureTime = currentRecord.captureTime,
+                            iri= currentRecord.iri,
+                            pavementDistress = currentRecord.pavementDistress
+                        )
 
                         val res = api.submitRecord(req)
                         if (res.isSuccess) {
