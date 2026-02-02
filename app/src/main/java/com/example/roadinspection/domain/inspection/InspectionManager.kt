@@ -11,6 +11,7 @@ import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.domain.iri.IriCalculator
 import com.example.roadinspection.service.KeepAliveService
 import com.example.roadinspection.worker.WorkManagerConfig
+import com.example.roadinspection.domain.capture.captureController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,7 +55,9 @@ class InspectionManager(
 ) {
 
     // 基础设施组件
-    private val addressProvider = AddressProvider(context)
+    private val captureController = captureController(
+        context, scope, locationProvider, cameraHelper, repository, onImageSaved
+    )
 
     // 协程任务句柄
     private var autoCaptureJob: Job? = null
@@ -121,12 +124,10 @@ class InspectionManager(
             // 4. 重置业务状态
             Log.d(TAG, "4. 重置里程计数器")
             locationProvider.startDistanceUpdates()
-            lastCaptureDistance = 0f
-            lastIriCalculationDistance = 0f
-
-            // 5. 启动双流业务
-            Log.i(TAG, "5. 启动双流业务调度 (拍照间隔: ${PHOTO_INTERVAL_METERS}m, IRI间隔: ${IRI_CALC_INTERVAL_METERS}m)")
-            startAutoCaptureFlow()
+            // 5. 直接委托给子控制器启动
+            currentTaskId?.let { id ->
+                captureController.start(id) // 👈 视觉业务全部移交
+            }
             startIriCalculationFlow()
         }
     }
@@ -144,7 +145,7 @@ class InspectionManager(
         Log.i(TAG, "🔴 正在停止巡检任务...")
 
         // 1. 停止业务流
-        autoCaptureJob?.cancel()
+        captureController.stop()
         iriCalculationJob?.cancel()
         Log.d(TAG, "1. 业务协程流已取消")
 
@@ -183,7 +184,7 @@ class InspectionManager(
             return false
         }
         Log.i(TAG, "📸 触发手动拍照")
-        performCapture(isAuto = false)
+        captureController.manualCapture()
         return true
     }
 
@@ -200,6 +201,8 @@ class InspectionManager(
         Log.d(TAG, "启动自动拍照流监听...")
         autoCaptureJob = scope.launch {
             locationProvider.getDistanceFlow().collect { totalDistance ->
+                var currentSpeed = locationProvider.getLocationFlow().value?.speed ?: 0f
+
                 if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
                     Log.d(TAG, "📏 里程达标 (拍照): Current=${"%.2f".format(totalDistance)}m, Last=${"%.2f".format(lastCaptureDistance)}m")
                     lastCaptureDistance = totalDistance
@@ -286,10 +289,18 @@ class InspectionManager(
             onSuccess = { savedUri ->
                 // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
                 scope.launch(Dispatchers.IO) {
-                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在解析地址...")
+                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在处理数据...")
 
-                    val addressStr = addressProvider.resolveAddress(capturedLocation)
-                    Log.d(TAG, "📍 地址解析完成: $addressStr")
+                    // ✨ 修改点：增加容错处理，允许离线保存
+                    var addressStr = "" // 默认为空，或者 "待识别"
+                    try {
+                        // 尝试联网解析地址
+//                        addressStr = addressProvider.resolveAddress(capturedLocation)
+                        Log.d(TAG, "📍 地址解析成功: $addressStr")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ 离线模式或网络超时: 暂时无法获取地址，将在上传前自动补全。Error: ${e.message}")
+                        // 这里不 return，继续往下走，只存经纬度
+                    }
 
                     val record = InspectionRecord(
                         taskId = taskId,
