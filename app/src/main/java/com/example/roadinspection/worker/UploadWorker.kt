@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.data.source.remote.CreateTaskReq
 import com.example.roadinspection.data.source.remote.FinishTaskReq
 import com.example.roadinspection.data.source.remote.OssHelper
@@ -37,12 +38,13 @@ class UploadWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         Log.i(TAG, "🚀 后台同步任务开始执行...")
+        val userId = TokenManager.currentUserId ?: return@withContext Result.failure()
 
         try {
             // ==============================================================
             // STEP 1: 同步新建的任务 (Create Task)
             // ==============================================================
-            val unsyncedTasks = repository.getUnsyncedTasks()
+            val unsyncedTasks = repository.getUnsyncedTasks(userId)
             for (task in unsyncedTasks) {
                 Log.d(TAG, "同步新任务: ${task.title} (${task.taskId})")
 
@@ -141,7 +143,7 @@ class UploadWorker(
             // ==============================================================
             // STEP 3: 同步任务结束状态 (Task Finish)
             // ==============================================================
-            val tasksToFinish = repository.getFinishedButNotSyncedTasks()
+            val tasksToFinish = repository.getFinishedButNotSyncedTasks(userId)
             for (task in tasksToFinish) {
                 if (task.endTime != null) {
                     Log.d(TAG, "同步任务结束状态: ${task.taskId}")

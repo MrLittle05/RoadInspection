@@ -91,17 +91,6 @@ class AndroidNativeApiImpl(
     }
 
     @JavascriptInterface
-    override fun clearTokens() {
-        Log.d(TAG, "JS 请求清除 Token")
-        TokenManager.clearTokens()
-    }
-
-    @JavascriptInterface
-    override fun getAccessToken(): String {
-        return TokenManager.accessToken ?: ""
-    }
-
-    @JavascriptInterface
     override fun startInspectionActivity(url: String) {
         Log.d(TAG, "JS请求跳转: $url")
         // 防止 JS 传入 ./inspection.html 或 /inspection.html 导致路径拼接错误
@@ -171,7 +160,7 @@ class AndroidNativeApiImpl(
                 // ---------------------------------------------------------
                 // 启动一个子协程专门负责监听数据库变化
                 launch {
-                    repository.getAllTasks()
+                    repository.getAllTasks(userId)
                         // 仅当数据内容发生实质变化时才通知，避免频繁刷新 UI
                         // 注意：InspectionTask 需要实现 equals/hashCode
                         // .distinctUntilChanged()

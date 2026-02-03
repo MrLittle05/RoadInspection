@@ -3,6 +3,7 @@ package com.example.roadinspection.data.source.local
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 import java.util.UUID
 
 /**
@@ -11,7 +12,10 @@ import java.util.UUID
  * 代表一次完整的巡检活动（从“开始巡检”到“结束巡检”）。
  * 作为 [InspectionRecord] 的父表，用于聚合和管理具体的巡检记录。
  */
-@Entity(tableName = "inspection_tasks")
+@Entity(
+    tableName = "inspection_tasks",
+    indices = [Index(value = ["inspector_id"])]
+)
 data class InspectionTask(
     /**
      * 任务全局唯一标识符 (UUID)。

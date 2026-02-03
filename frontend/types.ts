@@ -93,11 +93,6 @@ declare global {
       tryAutoLogin(): string;
 
       /**
-       * 获取当前的 AccessToken (可选，如果前端发请求需要用)
-       */
-      getAccessToken(): string;
-
-      /**
        * 触发原生端接管的退登流程。
        * 原生端处理完毕（网络请求+本地清理）后，会调用 window.onLogoutComplete
        */

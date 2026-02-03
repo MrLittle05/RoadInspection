@@ -62,14 +62,18 @@ class InspectionRepository(private val dao: InspectionDao) {
     /**
      * 获取所有尚未同步到服务器的任务 (syncState = 0)。
      * WorkManager 将遍历此列表，调用 /api/task/create 接口。
+     *
+     * @param userId 当前用户 ID
      */
-    suspend fun getUnsyncedTasks(): List<InspectionTask> = dao.getUnsyncedTasks()
+    suspend fun getUnsyncedTasks(userId: String): List<InspectionTask> = dao.getUnsyncedTasks(userId)
 
     /**
      * 获取本地已完成，但服务器状态仍为“进行中”的任务 (isFinished = 1 AND syncState = 1)。
      * WorkManager 将遍历此列表，调用 /api/task/finish 接口。
+     *
+     * @param userId 当前用户 ID
      */
-    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask> = dao.getFinishedButNotSyncedTasks()
+    suspend fun getFinishedButNotSyncedTasks(userId: String): List<InspectionTask> = dao.getFinishedButNotSyncedTasks(userId)
 
     /**
      * 更新任务的同步状态。
@@ -88,9 +92,10 @@ class InspectionRepository(private val dao: InspectionDao) {
     /**
      * 获取所有历史巡检任务列表。
      *
+     * @param userId 当前用户 ID
      * @return [Flow] 数据流。当数据库新增任务或状态改变时，UI 会自动刷新。
      */
-    fun getAllTasks(): Flow<List<InspectionTask>> = dao.getAllTasks()
+    fun getAllTasks(userId: String): Flow<List<InspectionTask>> = dao.getAllTasks(userId)
 
     /**
      * 保存一条巡检记录（照片及位置信息）。

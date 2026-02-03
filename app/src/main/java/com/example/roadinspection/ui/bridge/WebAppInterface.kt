@@ -25,12 +25,6 @@ interface AndroidNativeApi {
     fun saveTokens(accessToken: String, refreshToken: String)
 
     @JavascriptInterface
-    fun clearTokens()
-
-    @JavascriptInterface
-    fun getAccessToken(): String
-
-    @JavascriptInterface
     fun startInspectionActivity(url: String)
 
     @JavascriptInterface

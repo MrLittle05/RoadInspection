@@ -350,10 +350,19 @@ router.post("/api/auth/refresh", async (ctx) => {
       },
     };
   } catch (err) {
-    // Refresh Token 过期或格式错误
-    console.warn(`❌ [Refresh] 刷新失败: ${err.message}`);
-    ctx.status = 403; // 返回 403 触发前端强制登出
-    ctx.body = { code: 403, message: "登录凭证已过期，请重新登录" };
+    console.warn(`❌ [Refresh] 异常: ${err.message}`);
+
+    // 1. 如果是 JWT 相关的错误，说明是凭证问题 -> 403
+    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+      ctx.status = 403;
+      ctx.body = { code: 403, message: "登录凭证无效，请重新登录" };
+    }
+    // 2. 否则，视作服务器内部错误 -> 500 (或其他状态码，不要用 403)
+    else {
+      console.error(err); // 打印具体堆栈
+      ctx.status = 500;
+      ctx.body = { code: 500, message: "服务器繁忙，请稍后重试" };
+    }
   }
 });
 

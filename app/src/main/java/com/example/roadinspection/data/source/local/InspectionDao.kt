@@ -42,8 +42,8 @@ interface InspectionDao {
      *
      * @return [Flow] 数据流。当数据库发生变更时，UI 会自动接收到最新的列表。
      */
-    @Query("SELECT * FROM inspection_tasks ORDER BY start_time DESC")
-    fun getAllTasks(): Flow<List<InspectionTask>>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId ORDER BY start_time DESC")
+    fun getAllTasks(userId: String): Flow<List<InspectionTask>>
 
     /**
      * 根据 ID 获取单个任务详情。
@@ -59,8 +59,8 @@ interface InspectionDao {
      *
      * @return 待同步到服务器的任物列表
      */
-    @Query("SELECT * FROM inspection_tasks WHERE sync_state = 0")
-    suspend fun getUnsyncedTasks(): List<InspectionTask>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND sync_state = 0")
+    suspend fun getUnsyncedTasks(userId: String): List<InspectionTask>
 
     /**
      * 更新任务同步状态 (0 -> 1, 或 1 -> 2)
@@ -72,12 +72,12 @@ interface InspectionDao {
     suspend fun updateTaskSyncState(taskId: String, newState: Int)
 
     /**
-     * 查出本地已停止，但服务器还不知道的任务
+     * 查出当前用户本地已停止，但服务器还不知道的任务
      *
      * @return 待更新停止时间及同步状态的任务列表
      */
-    @Query("SELECT * FROM inspection_tasks WHERE is_finished = 1 AND sync_state = 1")
-    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND is_finished = 1 AND sync_state = 1")
+    suspend fun getFinishedButNotSyncedTasks(userId: String): List<InspectionTask>
 
     // -------------------------------------------------------------------------
     // Region: 巡检记录管理 (InspectionRecord)

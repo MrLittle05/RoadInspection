@@ -1,5 +1,6 @@
 package com.example.roadinspection.di
 
+import android.content.Context
 import com.example.roadinspection.BuildConfig
 import com.example.roadinspection.data.source.remote.AuthInterceptor
 import com.example.roadinspection.data.source.remote.InspectionApiService
@@ -17,8 +18,18 @@ import java.util.concurrent.TimeUnit
 object NetworkModule {
     private const val BASE_URL = BuildConfig.SERVER_URL
 
+    private lateinit var applicationContext: Context
+
+    fun init(context: Context) {
+        this.applicationContext = context.applicationContext
+    }
+
     // 配置 OkHttpClient
     private val okHttpClient: OkHttpClient by lazy {
+        if (!::applicationContext.isInitialized) {
+            throw IllegalStateException("NetworkModule must be initialized with context!")
+        }
+
         val builder = OkHttpClient.Builder()
 
         // 1. 设置超时时间 (根据上传图片的需求适当调大)
@@ -30,7 +41,7 @@ object NetworkModule {
         builder.addInterceptor(AuthInterceptor())
 
         // 3. 添加 Authenticator (自动处理 401 刷新 Token)
-        builder.authenticator(TokenAuthenticator())
+        builder.authenticator(TokenAuthenticator(applicationContext))
 
         builder.build()
     }

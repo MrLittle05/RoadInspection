@@ -93,9 +93,6 @@ class InspectionActivity : ComponentActivity() {
         )
         requestPermissionLauncher.launch(permissions)
 
-        // 开启 Worker
-        WorkManagerConfig.scheduleUpload(applicationContext)
-
         setContent {
             GreetingCardTheme {
                 // 拦截返回键，防止误触退出巡检
