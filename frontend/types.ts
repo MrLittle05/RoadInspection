@@ -69,11 +69,12 @@ declare global {
        */
       fetchRecords(taskId: string): void;
 
-      /**
+/**
        * 触发原生端加载巡检页面
-       * @param url 巡检页面路径及路径参数
+       * @param url 页面路径 (e.g. "inspection.html")
+       * @param resumeTaskId (可选) 如果是恢复任务，传入任务ID
        */
-      startInspectionActivity(url: string): void;
+      startInspectionActivity(url: string, resumeTaskId?: string): void;
 
       getApiBaseUrl(): string;
 

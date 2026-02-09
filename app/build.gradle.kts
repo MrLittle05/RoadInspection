@@ -87,6 +87,7 @@ dependencies {
     implementation(libs.gson)
     implementation("com.amap.api:3dmap-location-search:10.1.600_loc6.5.1_sea9.7.4")
     implementation("org.greenrobot:eventbus:3.3.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

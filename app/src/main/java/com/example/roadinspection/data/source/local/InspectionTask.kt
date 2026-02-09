@@ -64,5 +64,13 @@ data class InspectionTask(
      * 2 = 已同步且已结束 (Finalized)   -> 服务器已更新 end_time
     **/
     @ColumnInfo(name = "sync_state")
-    val syncState: Int = 0
+    val syncState: Int = 0,
+
+    /** 当前累计巡检里程 (米) */
+    @ColumnInfo(name = "current_distance")
+    val currentDistance: Float = 0f,
+
+    /** 当前累计巡检时长 (秒) */
+    @ColumnInfo(name = "current_duration")
+    val currentDuration: Long = 0L
 )

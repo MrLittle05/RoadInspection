@@ -28,6 +28,10 @@ import com.google.gson.Gson
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
+import com.example.roadinspection.data.model.VersionInfo
+import com.example.roadinspection.utils.UpdateManager
 
 /**
  * 主程序入口 Activity.
@@ -42,6 +46,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 使用 lifecycleScope 启动一个协程
+        lifecycleScope.launch {
+            // 1. 模拟：这里应该是一个真正的网络请求，去获取服务器的 JSON
+            // 假设这是从服务器拿到的数据
+            val serverVersion = VersionInfo(
+                versionCode = 2,
+                versionName = "1.1.0",
+                downloadUrl = "http://你的服务器/app.apk",
+                forceUpdate = false,
+                description = "修复了一些Bug"
+            )
+
+            // 2. 调用你的 UpdateManager
+            // 此时，UpdateManager 里的代码就会变成“被引用”状态，不再报灰
+            UpdateManager.checkAndDownload(this@MainActivity, serverVersion)
+        }
 
         // 1. 全局初始化
         // 初始化 Token 管理器
@@ -95,7 +116,7 @@ fun MainWebViewScreen() {
     }
 
     // ====================================================================================
-    // [核心修改] EventBus 监听逻辑
+    // EventBus 监听逻辑
     // 监听来自 TokenAuthenticator 的强制登出事件 (403)
     // ====================================================================================
     DisposableEffect(Unit) {
@@ -168,7 +189,7 @@ fun MainWebViewScreen() {
             }
         },
         update = { webView ->
-            // [关键] 更新 WebView 引用，供 EventBus 回调使用
+            // 更新 WebView 引用，供 EventBus 回调使用
             webViewRef = webView
         }
     )

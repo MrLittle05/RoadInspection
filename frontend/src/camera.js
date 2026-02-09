@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", init());
 
 function init() {
   userUI.initElements();
+  userUI.initJSBridgeCallback();
   nativeUI.initElements();
 
   initListeners();
@@ -21,8 +22,10 @@ function initListeners() {
   userUI.bind("zoom05", () => userUI.setZoom(0.5));
   userUI.bind("modePhoto", () => userUI.switchMode("photo"));
   userUI.bind("modeVideo", () => userUI.switchMode("video"));
-  userUI.bind("gallery", userUI.openGallery);
+  userUI.bind("gallery", userUI.handleGalleryClick);
   userUI.bind("shutter", userUI.handleShutter);
   userUI.bind("ai", userUI.toggleAI);
   userUI.bind("rotation", userUI.handleOrientation);
+  userUI.bind("resume", userUI.dismissExitModal);
+  userUI.bind("saveExit", userUI.handleSaveAndExit);
 }

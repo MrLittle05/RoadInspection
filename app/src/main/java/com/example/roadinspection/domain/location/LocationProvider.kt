@@ -68,15 +68,45 @@ class LocationProvider(private val context: Context) {
     }
 
     fun startDistanceUpdates() {
-        _distanceState.value = 0f
+        resetDistance()
         lastValidLocation = null
         kalmanFilter.reset()
         warmUpCounter = 5
         isUpdatingDistance = true
     }
 
+    fun pauseDistanceUpdates() {
+        isUpdatingDistance = false
+    }
+
+    fun resumeDistanceUpdates() {
+        lastValidLocation = null // Reset last location to avoid jump from pause location
+        kalmanFilter.reset()
+        warmUpCounter = 0
+        isUpdatingDistance = true
+    }
+
     fun stopDistanceUpdates() {
         isUpdatingDistance = false
+    }
+
+    /**
+     * 重置里程数据归零。
+     * 用于开启新巡检任务时。
+     * 注意：此方法只重置数据，不负责启动更新开关 (isUpdatingDistance)。
+     */
+    fun resetDistance() {
+        _distanceState.value = 0f
+    }
+
+    /**
+     * 设置初始里程。
+     * 用于恢复巡检任务 (Restore) 时，将数据库中保存的里程恢复到内存。
+     *
+     * @param distance 历史累计里程 (米)
+     */
+    fun setInitialDistance(distance: Float) {
+        _distanceState.value = distance
     }
 
     fun isUpdatingDistance(): Boolean = isUpdatingDistance

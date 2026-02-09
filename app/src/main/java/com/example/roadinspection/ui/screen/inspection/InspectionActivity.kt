@@ -49,6 +49,7 @@ import com.example.roadinspection.utils.DashboardUpdater
 import com.example.roadinspection.utils.notifyJsUpdateIri
 import com.example.roadinspection.utils.notifyJsUpdatePhoto
 import com.example.roadinspection.worker.WorkManagerConfig
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 class InspectionActivity : ComponentActivity() {
@@ -75,6 +76,9 @@ class InspectionActivity : ComponentActivity() {
 
         // 获取 intent 中的 URL
         val targetUrl = intent.getStringExtra("TARGET_URL") ?: "file:///android_asset/inspection.html"
+
+        // 获取恢复任务的 Id
+        val resumeTaskId = intent.getStringExtra("RESUME_TASK_ID")
 
         ServiceSettings.updatePrivacyShow(this, true, true)
         ServiceSettings.updatePrivacyAgree(this, true)
@@ -116,6 +120,7 @@ class InspectionActivity : ComponentActivity() {
                     // 2. 顶层 WebView HUD
                     InspectionWebViewLayer(
                         url = targetUrl,
+                        resumeTaskId = resumeTaskId,
                         locationProvider = locationProvider,
                         gpsSignalProvider = gpsSignalProvider,
                         networkStatusProvider = networkStatusProvider,
@@ -130,6 +135,20 @@ class InspectionActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         startTrackingServices()
+    }
+
+    override fun onPause() {
+        super.onPause()
+
+        // 仅释放相机预览（视觉层），保留拍照能力
+        // CameraX 的 Preview 会在 onPause() 自动暂停渲染，无需手动 unbind
+        // 同时 ImageCapture 保持绑定，JS 仍可调用 takePhoto()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 相机预览自动恢复（CameraX 绑定到 Lifecycle）
+        // 定位如未停止则继续运行，无需额外操作
     }
 
     override fun onStop() {
@@ -223,6 +242,7 @@ fun CameraPreviewLayer(
 @Composable
 fun InspectionWebViewLayer(
     url: String,
+    resumeTaskId: String?,
     locationProvider: LocationProvider,
     gpsSignalProvider: GpsSignalProvider,
     networkStatusProvider: NetworkStatusProvider,
@@ -247,7 +267,17 @@ fun InspectionWebViewLayer(
         InspectionManager(context, repository, locationProvider, cameraHelper, iriCalculator, scope, onImageSaved, onIriCalculated)
     }
 
+    LaunchedEffect(resumeTaskId) {
+        if (resumeTaskId != null) {
+            inspectionManager.restoreInspection(resumeTaskId)
+        }
+    }
+
     val selectImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { }
+
+    BackHandler {
+        webViewRef?.evaluateJavascript("window.JSBridge.onNativeBackPressed()", null)
+    }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -282,6 +312,27 @@ fun InspectionWebViewLayer(
                 addJavascriptInterface(api, "AndroidNative")
 
                 loadUrl(url)
+
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        updater.start()
+
+                        // 页面加载完毕后，将恢复的状态注入给 JS
+                        if (resumeTaskId != null) {
+                            scope.launch {
+                                val state = repository.getTaskState(resumeTaskId)
+                                if (state.isNotEmpty()) {
+                                    val json = org.json.JSONObject(state).toString()
+                                    val script = "window.JSBridge.onRestoreState($json)"
+
+                                    Log.d("InspectionActivity", "注入恢复状态: $script")
+                                    view?.evaluateJavascript(script, null)
+                                }
+                            }
+                        }
+                    }
+                }
             }.also { webViewRef = it }
         }
     )

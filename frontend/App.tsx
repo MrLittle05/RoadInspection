@@ -395,10 +395,7 @@ const App: React.FC = () => {
     const url = `./inspection.html?${params.toString()}`;
 
     if (window.AndroidNative && window.AndroidNative.startInspectionActivity) {
-      window.AndroidNative.startInspectionActivity(url);
-    } else {
-      // 兼容在浏览器调试的情况
-      window.location.href = url;
+      window.AndroidNative.startInspectionActivity(url, null);
     }
   };
 

@@ -90,12 +90,45 @@ class InspectionRepository(private val dao: InspectionDao) {
     }
 
     /**
+     * 根据 ID 获取特定巡检任务详情。
+     * 用于断点续传时恢复任务现场 (Checkpoint)，读取已保存的里程和时长。
+     *
+     * @param taskId 任务 UUID
+     * @return [InspectionTask] 实体，如果找不到则返回 null
+     */
+    suspend fun getTaskById(taskId: String): InspectionTask? {
+        return dao.getTaskById(taskId)
+    }
+
+    /**
      * 获取所有历史巡检任务列表。
      *
      * @param userId 当前用户 ID
      * @return [Flow] 数据流。当数据库新增任务或状态改变时，UI 会自动刷新。
      */
     fun getAllTasks(userId: String): Flow<List<InspectionTask>> = dao.getAllTasks(userId)
+
+    /**
+     * 保存任务进度缓存
+     */
+    suspend fun saveTaskCheckpoint(taskId: String, distance: Float, duration: Long) {
+        dao.updateTaskCheckpoint(taskId, distance, duration)
+    }
+
+    /**
+     * 获取任务的恢复状态数据 (用于注入前端)。
+     *
+     * @param taskId 任务 ID
+     * @return 包含 distance, seconds, isPaused 等字段的 Map
+     */
+    suspend fun getTaskState(taskId: String): Map<String, Any> {
+        val task = dao.getTaskById(taskId) ?: return emptyMap()
+
+        return mapOf(
+            "distance" to task.currentDistance,
+            "seconds" to task.currentDuration
+        )
+    }
 
     /**
      * 保存一条巡检记录（照片及位置信息）。

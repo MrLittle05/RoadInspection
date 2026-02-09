@@ -79,6 +79,13 @@ interface InspectionDao {
     @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND is_finished = 1 AND sync_state = 1")
     suspend fun getFinishedButNotSyncedTasks(userId: String): List<InspectionTask>
 
+    /**
+     * 更新任务进度缓存 (里程 + 时长)。
+     * 用于“暂停”或“退出”时保存现场，以便下次恢复。
+     */
+    @Query("UPDATE inspection_tasks SET current_distance = :distance, current_duration = :duration WHERE task_id = :taskId")
+    suspend fun updateTaskCheckpoint(taskId: String, distance: Float, duration: Long)
+
     // -------------------------------------------------------------------------
     // Region: 巡检记录管理 (InspectionRecord)
     // -------------------------------------------------------------------------
@@ -260,9 +267,25 @@ interface InspectionDao {
             true
         }
 
+        val finalTasksToSave = safeToUpdateTasks.map { netTask ->
+            // 尝试获取本地记录
+            val localTask = getTaskById(netTask.taskId)
+
+            if (localTask != null) {
+                // 如果本地存在，继承本地的缓存字段
+                netTask.copy(
+                    currentDistance = localTask.currentDistance,
+                    currentDuration = localTask.currentDuration,
+                    // 如果未来有其他本地独有字段，也要在这里 copy
+                )
+            } else {
+                netTask
+            }
+        }
+
         // 3. 批量写入
-        if (safeToUpdateTasks.isNotEmpty()) {
-            insertOrUpdateTasks(safeToUpdateTasks)
+        if (finalTasksToSave.isNotEmpty()) {
+            insertOrUpdateTasks(finalTasksToSave)
         }
     }
 
