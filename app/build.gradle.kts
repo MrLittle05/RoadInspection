@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.gson)
     implementation("com.amap.api:3dmap-location-search:10.1.600_loc6.5.1_sea9.7.4")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

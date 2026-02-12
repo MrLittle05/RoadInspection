@@ -61,7 +61,7 @@ class captureController(
         Log.i(TAG, "🟢 视觉巡检流已启动 (TaskId: $taskId)")
 
         captureJob?.cancel()
-        captureJob = scope.launch {
+        captureJob = scope.launch(Dispatchers.Default) {
             // 使用 isActive 配合 delay 实现主控循环
             while (isActive) {
                 val location = locationProvider.getLocationFlow().value
