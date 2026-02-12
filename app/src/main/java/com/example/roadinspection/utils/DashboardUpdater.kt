@@ -201,20 +201,22 @@ class DashboardUpdater(
     private fun startInspectionCountUpdates() {
         scope.launch {
             repository.unfinishedCount.collect { count ->
-                updateUploadCount(count)
+                Log.d(TAG, "推送给前端待上传数: $count")
+                val jsCode = "javascript:window.updateUploadCount($count)"
+                webView.evaluateJavascript(jsCode, null)
                 }
         }
     }
 
-    private fun updateUploadCount(count: Int) {
-        // 这里的 "updateUploadCount" 是前端网页里定义好的 JS 方法名
-        val jsCode = "javascript:window.updateUploadCount($count)"
-
-        // 必须在主线程更新 UI
-        webView.post {
-            webView.evaluateJavascript(jsCode, null)
-        }
-
-        Log.d(TAG, "推送给前端待上传数: $count")
-    }
+//    private fun updateUploadCount(count: Int) {
+//        // 这里的 "updateUploadCount" 是前端网页里定义好的 JS 方法名
+//        val jsCode = "javascript:window.updateUploadCount($count)"
+//
+//        // 必须在主线程更新 UI
+//        webView.post {
+//            webView.evaluateJavascript(jsCode, null)
+//        }
+//
+//        Log.d(TAG, "推送给前端待上传数: $count")
+//    }
 }

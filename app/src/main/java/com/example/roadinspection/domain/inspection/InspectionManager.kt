@@ -196,21 +196,21 @@ class InspectionManager(
      * 业务流 A：自动定距拍照
      * 监听距离变化，每 [PHOTO_INTERVAL_METERS] 米触发一次 [performCapture]。
      */
-    private fun startAutoCaptureFlow() {
-        autoCaptureJob?.cancel()
-        Log.d(TAG, "启动自动拍照流监听...")
-        autoCaptureJob = scope.launch {
-            locationProvider.getDistanceFlow().collect { totalDistance ->
-                var currentSpeed = locationProvider.getLocationFlow().value?.speed ?: 0f
-
-                if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
-                    Log.d(TAG, "📏 里程达标 (拍照): Current=${"%.2f".format(totalDistance)}m, Last=${"%.2f".format(lastCaptureDistance)}m")
-                    lastCaptureDistance = totalDistance
-                    performCapture(isAuto = true)
-                }
-            }
-        }
-    }
+//    private fun startAutoCaptureFlow() {
+//        autoCaptureJob?.cancel()
+//        Log.d(TAG, "启动自动拍照流监听...")
+//        autoCaptureJob = scope.launch {
+//            locationProvider.getDistanceFlow().collect { totalDistance ->
+//                var currentSpeed = locationProvider.getLocationFlow().value?.speed ?: 0f
+//
+//                if (totalDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
+//                    Log.d(TAG, "📏 里程达标 (拍照): Current=${"%.2f".format(totalDistance)}m, Last=${"%.2f".format(lastCaptureDistance)}m")
+//                    lastCaptureDistance = totalDistance
+//                    performCapture(isAuto = true)
+//                }
+//            }
+//        }
+//    }
 
     /**
      * 业务流 B：IRI 实时计算
@@ -264,67 +264,7 @@ class InspectionManager(
         }
     }
 
-    /**
-     * 统一拍照执行逻辑
-     *
-     * 包含：位置冻结 -> 拍照 -> 地址解析(异步) -> 存库 -> UI通知
-     *
-     * @param isAuto 是否为自动触发 (用于日志区分)
-     */
-    private fun performCapture(isAuto: Boolean) {
-        val taskId = currentTaskId ?: return
-        val modeStr = if (isAuto) "自动" else "手动"
 
-        // 1. 冻结位置 (防止异步操作期间位置漂移)
-        val capturedLocation = locationProvider.getLocationFlow().value
-        if (capturedLocation == null) {
-            Log.w(TAG, "⚠️ 跳过拍照 ($modeStr): 当前位置信息未知")
-            return
-        }
-
-        Log.v(TAG, "⚡ 开始执行拍照 ($modeStr)...")
-
-        cameraHelper.takePhoto(
-            isAuto = isAuto,
-            onSuccess = { savedUri ->
-                // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
-                scope.launch(Dispatchers.IO) {
-                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在处理数据...")
-
-                    // ✨ 修改点：增加容错处理，允许离线保存
-                    var addressStr = "" // 默认为空，或者 "待识别"
-                    try {
-                        // 尝试联网解析地址
-//                        addressStr = addressProvider.resolveAddress(capturedLocation)
-                        Log.d(TAG, "📍 地址解析成功: $addressStr")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "⚠️ 离线模式或网络超时: 暂时无法获取地址，将在上传前自动补全。Error: ${e.message}")
-                        // 这里不 return，继续往下走，只存经纬度
-                    }
-
-                    val record = InspectionRecord(
-                        taskId = taskId,
-                        localPath = savedUri.toString(),
-                        captureTime = System.currentTimeMillis(),
-                        latitude = capturedLocation.latitude,
-                        longitude = capturedLocation.longitude,
-                        address = addressStr
-                    )
-
-                    repository.saveRecord(record)
-                    Log.i(TAG, "💾 记录已写入数据库 [${record}]")
-
-                    WorkManagerConfig.scheduleUpload(context)
-
-                    // 3. 通知 UI
-                    onImageSaved(savedUri)
-                }
-            },
-            onError = { error ->
-                Log.e(TAG, "❌ 拍照失败 ($modeStr): $error")
-            }
-        )
-    }
 
     // -------------------------------------------------------------------------
     // Region: 辅助方法
@@ -355,4 +295,66 @@ class InspectionManager(
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         return "日常巡检 ${sdf.format(Date())}"
     }
+
+    /**
+     * 统一拍照执行逻辑
+     *
+     * 包含：位置冻结 -> 拍照 -> 地址解析(异步) -> 存库 -> UI通知
+     *
+     * @param isAuto 是否为自动触发 (用于日志区分)
+     */
+//    private fun performCapture(isAuto: Boolean) {
+//        val taskId = currentTaskId ?: return
+//        val modeStr = if (isAuto) "自动" else "手动"
+//
+//        // 1. 冻结位置 (防止异步操作期间位置漂移)
+//        val capturedLocation = locationProvider.getLocationFlow().value
+//        if (capturedLocation == null) {
+//            Log.w(TAG, "⚠️ 跳过拍照 ($modeStr): 当前位置信息未知")
+//            return
+//        }
+//
+//        Log.v(TAG, "⚡ 开始执行拍照 ($modeStr)...")
+//
+//        cameraHelper.takePhoto(
+//            isAuto = isAuto,
+//            onSuccess = { savedUri ->
+//                // 2. 切到 IO 线程处理耗时操作 (地址解析 & 数据库)
+//                scope.launch(Dispatchers.IO) {
+//                    Log.d(TAG, "📸 相机拍摄成功 ($modeStr), Uri: $savedUri. 正在处理数据...")
+//
+//                    // ✨ 修改点：增加容错处理，允许离线保存
+//                    var addressStr = "" // 默认为空，或者 "待识别"
+//                    try {
+//                        // 尝试联网解析地址
+////                        addressStr = addressProvider.resolveAddress(capturedLocation)
+//                        Log.d(TAG, "📍 地址解析成功: $addressStr")
+//                    } catch (e: Exception) {
+//                        Log.w(TAG, "⚠️ 离线模式或网络超时: 暂时无法获取地址，将在上传前自动补全。Error: ${e.message}")
+//                        // 这里不 return，继续往下走，只存经纬度
+//                    }
+//
+//                    val record = InspectionRecord(
+//                        taskId = taskId,
+//                        localPath = savedUri.toString(),
+//                        captureTime = System.currentTimeMillis(),
+//                        latitude = capturedLocation.latitude,
+//                        longitude = capturedLocation.longitude,
+//                        address = addressStr
+//                    )
+//
+//                    repository.saveRecord(record)
+//                    Log.i(TAG, "💾 记录已写入数据库 [${record}]")
+//
+//                    WorkManagerConfig.scheduleUpload(context)
+//
+//                    // 3. 通知 UI
+//                    onImageSaved(savedUri)
+//                }
+//            },
+//            onError = { error ->
+//                Log.e(TAG, "❌ 拍照失败 ($modeStr): $error")
+//            }
+//        )
+//    }
 }

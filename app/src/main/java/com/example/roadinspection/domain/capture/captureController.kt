@@ -10,6 +10,7 @@ import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.worker.WorkManagerConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 视觉巡检控制器
@@ -35,6 +36,13 @@ class captureController(
     private var currentTaskId: String? = null
     private var lastCaptureDistance = 0f
 
+    private val isCapturing = AtomicBoolean(false)
+
+    // 🔴 1. 定义最大重试次数 (50ms * 40 = 2000ms = 2秒)
+    // 如果2秒还没拍好一张，说明要么车速极快，要么相机卡死，必须跳过
+    private val MAX_RETRY_COUNT = 40
+    private var retryCount = 0
+
     companion object {
         private const val TAG = "captureController"
         private const val PHOTO_INTERVAL_METERS = 10.0
@@ -59,28 +67,56 @@ class captureController(
                 val location = locationProvider.getLocationFlow().value
                 val currentDistance = locationProvider.getDistanceFlow().value
                 val speed = location?.speed ?: 0f
+                // 计算积压的里程
+                val distanceGap = currentDistance - lastCaptureDistance
 
-                if (speed > HIGH_SPEED_THRESHOLD_MS) {
-                    // === 高速模式 (预测) ===
-                    val msPer10m = ((PHOTO_INTERVAL_METERS / speed) * 1000).toLong()
-                    val safeDelay = msPer10m.coerceAtLeast(200L) // 只有200ms间隔也没法拍，硬件跟不上
+                if (distanceGap >= PHOTO_INTERVAL_METERS) {
+                    // === A. 正常情况：相机空闲 ===
+                    if (!isCapturing.get()) {
+                        Log.d(TAG, "📍 触发拍照 (Gap: $distanceGap)")
 
-                    Log.v(TAG, "🚀 高速模式 ($speed m/s): 预测将在 ${safeDelay}ms 后拍照")
-                    delay(safeDelay)
-
-                    // 拍照 (手动累加里程，因为还没收到GPS更新)
-                    lastCaptureDistance += PHOTO_INTERVAL_METERS.toFloat()
-                    performCapture(isAuto = true, savedDistance = lastCaptureDistance)
-
-                } else {
-                    // === 低速模式 (轮询检测) ===
-                    if (currentDistance - lastCaptureDistance >= PHOTO_INTERVAL_METERS) {
-                        Log.d(TAG, "🐢 低速模式: 里程达标，触发拍照")
-                        lastCaptureDistance = currentDistance
                         performCapture(isAuto = true, savedDistance = currentDistance)
+
+                        // 核心：只推进10米
+                        lastCaptureDistance += PHOTO_INTERVAL_METERS.toFloat()
+
+                        // 成功触发了一次，重置计数器
+                        retryCount = 0
                     }
-                    // 低速下不需要太高频检查，500ms 足够
-                    delay(500)
+                    // === B. 异常情况：相机忙碌 ===
+                    else {
+                        retryCount++
+
+                        // 策略1: 还在容忍范围内，只是计数，什么都不做
+                        // 下次循环(50ms后)会自然重试
+                        if (retryCount < MAX_RETRY_COUNT) {
+                            if (retryCount % 10 == 0) Log.v(
+                                TAG,
+                                "⏳ 相机忙碌，等待中... ($retryCount/$MAX_RETRY_COUNT)"
+                            )
+                        }
+                        // 策略2: 【熔断】超时了，强制跳过！
+                        else {
+                            Log.e(TAG, "⚠️ 相机卡死或处理过慢，强制跳过本次拍照！(Gap: $distanceGap)")
+
+                            // 1. 强制认为上一张结束了（防止永久锁死）
+                            isCapturing.set(false)
+
+                            // 2. 放弃这张照片，把标尺往前拉
+                            // 比如积压了 30米，直接把标尺拉到当前位置，虽然丢了片，但保住了后面的流程
+                            lastCaptureDistance = currentDistance
+
+                            retryCount = 0
+                        }
+                    }
+                    // === C. 极端情况防御：由于GPS漂移或停车，积压了过大里程 ===
+                    // 比如 Gap 突然变成 100米（可能是程序切后台回来），不要连拍10张，直接重置
+                    if (distanceGap > 100) {
+                        Log.w(TAG, "🚀 里程跳变过大 ($distanceGap m)，重置标尺")
+                        lastCaptureDistance = currentDistance
+                    }
+
+                    delay(50) // 50ms 检测一次
                 }
             }
         }
@@ -105,12 +141,20 @@ class captureController(
 
     // 私有：统一拍照实现
     private fun performCapture(isAuto: Boolean, savedDistance: Float) {
+        if (isCapturing.get()) {
+            Log.w(TAG, "相机忙碌中，本次触发丢弃") // 至少你知道是因为这里丢的
+            return
+        }
+        isCapturing.set(true)
+
         val taskId = currentTaskId ?: return
         val location = locationProvider.getLocationFlow().value ?: return // 无位置不拍照
 
         cameraHelper.takePhoto(
             isAuto = isAuto,
             onSuccess = { uri ->
+                isCapturing.set(false)
+
                 // 开启子协程处理 IO
                 scope.launch(Dispatchers.IO) {
                     // 1. 尝试解析地址 (失败则忽略)
@@ -138,7 +182,10 @@ class captureController(
                     Log.d(TAG, "✅ 图片已保存: $uri")
                 }
             },
-            onError = { e -> Log.e(TAG, "❌ 拍照失败: $e") }
+            onError = { e ->
+                isCapturing.set(false)
+                Log.e(TAG, "❌ 拍照失败: $e")
+            }
         )
     }
 }

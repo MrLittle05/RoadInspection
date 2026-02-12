@@ -105,7 +105,16 @@ class InspectionActivity : ComponentActivity() {
                     finish()
                 }
 
-                val imageCapture = remember { ImageCapture.Builder().build() }
+                val imageCapture = remember {
+                    ImageCapture.Builder()
+                        // 1. 开启极速模式 (关键！大幅减少 Busy 状态)
+                        .setCaptureMode(androidx.camera.core.ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+
+                        // 2. 限制分辨率为 1080P (关键！减少 IO 耗时)
+                        .setTargetResolution(android.util.Size(1920, 1080))
+
+                        .build()
+                }
                 var currentZoomRatio by remember { mutableFloatStateOf(1f) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
