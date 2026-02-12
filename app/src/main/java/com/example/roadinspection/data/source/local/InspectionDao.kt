@@ -326,10 +326,23 @@ interface InspectionDao {
         // 1. 获取本地未同步列表 (sync_status != 2)
         val unsyncedIds = getUnsyncedRecordIds(taskId).toHashSet()
 
-        // 2. 内存过滤：剔除掉那些本地还没上传的数据
-        // 逻辑：如果网络数据里的 ID 在 dirtyIds 里，说明本地有未提交的修改，跳过网络版，保留本地版。
-        val recordsToSave = networkRecords.filter { netRecord ->
-            !unsyncedIds.contains(netRecord.recordId)
+        val localPaths = getLocalPathMap(taskId).associate { it.recordId to it.localPath }
+
+        val recordsToSave = networkRecords.mapNotNull { netRecord ->
+            val id = netRecord.recordId
+
+            when {
+                // 情况 A: 本地有未上传修改 (sync_status != 2) -> 跳过网络版，保护本地版
+                unsyncedIds.contains(id) -> null
+
+                // 情况 B: 本地已同步 (sync_status = 2)，但有物理文件 -> 保留本地路径
+                localPaths.containsKey(id) -> {
+                    netRecord.copy(localPath = localPaths[id]!!)
+                }
+
+                // 情况 C: 纯新数据或本地已清理 -> 直接使用网络版 (localPath 为 "")
+                else -> netRecord
+            }
         }
 
         // 3. 批量写入
@@ -351,4 +364,11 @@ interface InspectionDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateRecords(records: List<InspectionRecord>)
+
+    /**
+     * 辅助查询：获取指定任务下所有记录的本地路径映射。
+     * 返回 record_id 和 local_path，减少内存消耗。
+     */
+    @Query("SELECT record_id, local_path FROM inspection_records WHERE task_id = :taskId AND local_path != ''")
+    suspend fun getLocalPathMap(taskId: String): List<LocalPathTuple>
 }

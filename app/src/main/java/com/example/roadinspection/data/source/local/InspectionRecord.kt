@@ -99,3 +99,9 @@ data class InspectionRecord(
     @ColumnInfo(name = "pavement_distress")
     val pavementDistress: String? = null
 )
+
+
+data class LocalPathTuple(
+    @ColumnInfo(name = "record_id") val recordId: String,
+    @ColumnInfo(name = "local_path") val localPath: String
+)
