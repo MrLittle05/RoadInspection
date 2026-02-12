@@ -283,6 +283,8 @@ fun InspectionWebViewLayer(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             WebView(ctx).apply {
+                WebView.setWebContentsDebuggingEnabled(true)
+
                 setBackgroundColor(Color.TRANSPARENT) // 透明背景以显示相机
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true

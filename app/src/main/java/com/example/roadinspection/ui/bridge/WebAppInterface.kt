@@ -64,5 +64,8 @@ interface AndroidNativeApi {
     fun fetchRecords(taskId: String)
 
     @JavascriptInterface
+    fun deleteTask(taskId: String)
+
+    @JavascriptInterface
     fun logout()
 }

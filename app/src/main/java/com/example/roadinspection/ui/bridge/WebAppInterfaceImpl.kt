@@ -14,7 +14,9 @@ import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.ui.screen.inspection.InspectionActivity
 import com.example.roadinspection.utils.invokeJsCallback
+import com.example.roadinspection.worker.WorkManagerConfig
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -253,6 +255,10 @@ class AndroidNativeApiImpl(
                         .catch { e -> handleException("fetchRecordsFlow", "onRecordsReceived", e as Exception) }
                         .collect { records ->
                             val response = ApiResponse.success(records)
+                            Log.d(TAG, "fetchRecordsFlow: $response")
+                            val gson = GsonBuilder()
+                                .serializeNulls() // 输出 null 字段 (默认为不输出)
+                                .create()
                             webViewRef.get()?.invokeJsCallback("onRecordsReceived", gson.toJson(response))
                         }
                 }
@@ -262,6 +268,24 @@ class AndroidNativeApiImpl(
 
             } catch (e: Exception) {
                 Log.w(TAG, "fetchRecords 流程异常: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    override fun deleteTask(taskId: String) {
+        Log.d(TAG, "JS 请求删除任务: $taskId")
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // 1. 标记数据库状态 (-1)，UI 会自动刷新消失
+                repository.markTaskForDeletion(taskId)
+
+                // 2. 调度独立的 DeleteWorker
+                WorkManagerConfig.scheduleDeletion(context)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "删除任务失败", e)
             }
         }
     }

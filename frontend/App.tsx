@@ -69,6 +69,7 @@ const App: React.FC = () => {
       response: NativeApiResponse<InspectionTask[]>,
     ) => {
       console.log("📂 [App] Native onTasksReceived:", response.msg);
+      console.log(response.data);
 
       if (response.data) {
         setTasks(response.data);
@@ -96,6 +97,7 @@ const App: React.FC = () => {
       response: NativeApiResponse<InspectionRecord[]>,
     ) => {
       console.log("📂 [App] Native onRecordsReceived:", response.msg);
+      console.log(response.data);
 
       if (response.data) {
         setTaskRecords(response.data);

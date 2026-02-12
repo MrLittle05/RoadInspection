@@ -165,6 +165,8 @@ fun MainWebViewScreen() {
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             WebView(ctx).apply {
+                WebView.setWebContentsDebuggingEnabled(true)
+
                 // WebView 基础配置
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true

@@ -15,13 +15,13 @@ export interface InspectionRecord {
   taskId: string;
   localPath: string;
   serverUrl: string | null;
-  syncStatus: number; // 0 = Synced, 1 = Pending
+  syncStatus: number;
   captureTime: number;
   latitude: number;
   longitude: number;
   address: string | null;
-  iri: number; // International Roughness Index
-  pavementDistress: string[]; // Changed to array to support multiple distresses
+  iri: number | null; // International Roughness Index
+  pavementDistress: string[] | null; // Changed to array to support multiple distresses
 }
 
 export interface User {
@@ -69,7 +69,7 @@ declare global {
        */
       fetchRecords(taskId: string): void;
 
-/**
+      /**
        * 触发原生端加载巡检页面
        * @param url 页面路径 (e.g. "inspection.html")
        * @param resumeTaskId (可选) 如果是恢复任务，传入任务ID
@@ -92,6 +92,16 @@ declare global {
        * @returns JSON 字符串 (User 对象) 或 空字符串
        */
       tryAutoLogin(): string;
+
+      /**
+       * 触发删除指定任务及其关联数据。
+       * * 该操作是异步的：
+       * 1. 原生层会立即将任务标记为“待删除”状态 (SyncState = -1)，UI 应立即移除该项。
+       * 2. 原生层会启动后台 Worker 与服务器同步删除操作。
+       * 3. 最终在本地数据库执行物理删除。
+       * * @param taskId 要删除的任务的 ID
+       */
+      deleteTask(taskId: string): void;
 
       /**
        * 触发原生端接管的退登流程。

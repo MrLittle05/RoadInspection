@@ -1,6 +1,5 @@
 package com.example.roadinspection.data.repository
 
-import android.content.Context
 import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
@@ -11,7 +10,6 @@ import com.example.roadinspection.data.source.remote.TaskDto
 import com.example.roadinspection.data.source.remote.RecordDto
 import com.example.roadinspection.data.source.remote.UpdateProfileReq
 import com.example.roadinspection.data.source.remote.UserDto
-import com.example.roadinspection.di.NetworkModule
 import com.example.roadinspection.di.NetworkModule.api
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -337,6 +335,41 @@ class InspectionRepository(private val dao: InspectionDao) {
         // 清除本地凭证
        TokenManager.clearTokens()
     }
+
+    // =========================================================================
+    // Region: 删除任务相关逻辑
+    // =========================================================================
+
+    /**
+     * [UI 调用] 标记任务为删除状态。
+     * 这会立即从 UI 列表中移除该任务，并触发后台同步删除。
+     */
+    suspend fun markTaskForDeletion(taskId: String) {
+        dao.markTaskAsDeleted(taskId)
+    }
+
+    /**
+     * [Worker 调用] 获取所有待同步删除的任务。
+     */
+    suspend fun getPendingDeleteTasks(): List<InspectionTask> {
+        return dao.getPendingDeleteTasks()
+    }
+
+    /**
+     * [Worker 调用] 物理删除任务。
+     * 当服务器确认删除（或软删除）成功后，本地彻底清除数据以释放空间。
+     */
+    suspend fun finalizeDeletion(taskId: String) {
+        val filePaths = dao.getLocalPathsByTaskId(taskId)
+
+        // 2. 执行数据库物理删除
+        dao.deleteTask(taskId)
+
+        // 3. 清理图片
+        if (filePaths.isNotEmpty()) {
+            deleteLocalPictures(filePaths)
+        }
+    }
 }
 
 /**
@@ -372,4 +405,36 @@ private fun RecordDto.toEntity(): InspectionRecord {
         longitude = this.rawLng,
         address = this.address
     )
+}
+
+/**
+ * 辅助方法：批量删除物理文件
+ * 复用 clearExpiredFiles 中的路径清洗逻辑
+ */
+private fun deleteLocalPictures(paths: List<String>) {
+    var deletedCount = 0
+    for (rawPath in paths) {
+        try {
+            // 清洗路径：移除 file:// 前缀
+            val normalizedPath = rawPath
+                .replaceFirst(Regex("^file:///?"), "/")
+                .replaceFirst(Regex("^content://.*"), "") // content:// 无法直接通过 File 删除，跳过
+
+            if (normalizedPath.isNotEmpty() && normalizedPath.startsWith("/")) {
+                val file = File(normalizedPath)
+                if (file.exists()) {
+                    if (file.delete()) {
+                        deletedCount++
+                    } else {
+                        android.util.Log.w("InspectionRepo", "文件删除失败 (权限或占用): $normalizedPath")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("InspectionRepo", "清理文件异常: ${e.message}")
+        }
+    }
+    if (deletedCount > 0) {
+        android.util.Log.i("InspectionRepo", "已清理任务关联图片: $deletedCount 张")
+    }
 }

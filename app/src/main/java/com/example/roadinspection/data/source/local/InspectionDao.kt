@@ -42,7 +42,7 @@ interface InspectionDao {
      *
      * @return [Flow] 数据流。当数据库发生变更时，UI 会自动接收到最新的列表。
      */
-    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId ORDER BY start_time DESC")
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND sync_state != -1 ORDER BY start_time DESC")
     fun getAllTasks(userId: String): Flow<List<InspectionTask>>
 
     /**
@@ -86,6 +86,20 @@ interface InspectionDao {
     @Query("UPDATE inspection_tasks SET current_distance = :distance, current_duration = :duration WHERE task_id = :taskId")
     suspend fun updateTaskCheckpoint(taskId: String, distance: Float, duration: Long)
 
+    /**
+     * 标记任务状态为“待删除”。
+     * 用于 UI 立即响应，等待后台同步。
+     */
+    @Query("UPDATE inspection_tasks SET sync_state = -1 WHERE task_id = :taskId")
+    suspend fun markTaskAsDeleted(taskId: String)
+
+    /**
+     * 获取所有标记为“待删除”的任务
+     * 用于后台同步。
+     */
+    @Query("SELECT * FROM inspection_tasks WHERE sync_state = -1")
+    suspend fun getPendingDeleteTasks(): List<InspectionTask>
+
     // -------------------------------------------------------------------------
     // Region: 巡检记录管理 (InspectionRecord)
     // -------------------------------------------------------------------------
@@ -121,6 +135,13 @@ interface InspectionDao {
      */
     @Query("SELECT * FROM inspection_records WHERE task_id = :taskId AND sync_status = :status ORDER BY capture_time ASC")
     fun getRecordsByTaskAndStatus(taskId: String, status: Int): Flow<List<InspectionRecord>>
+
+    /**
+     * 获取指定任务下所有非空的本地文件路径。
+     * 用于在物理删除任务前，清理手机存储中的图片文件。
+     */
+    @Query("SELECT local_path FROM inspection_records WHERE task_id = :taskId AND local_path != ''")
+    suspend fun getLocalPathsByTaskId(taskId: String): List<String>
 
     // -------------------------------------------------------------------------
     // Region: 后台同步专用 (WorkManager)

@@ -13,8 +13,6 @@ import androidx.work.PeriodicWorkRequestBuilder
 
 object WorkManagerConfig {
 
-    private const val WORK_NAME = "RoadInspectionUpload"
-
     /**
      * 调度一次上传任务。
      * 建议在以下时机调用：
@@ -40,7 +38,7 @@ object WorkManagerConfig {
 
         // 4. 加入队列 (使用 KEEP 策略：如果已有任务在跑，就保留原来的，不重复添加)
         WorkManager.getInstance(context).enqueueUniqueWork(
-            WORK_NAME,
+            "RoadInspectionUpload",
             ExistingWorkPolicy.KEEP,
             uploadRequest
         )
@@ -65,6 +63,34 @@ object WorkManagerConfig {
             "DailyCleanup",
             ExistingPeriodicWorkPolicy.KEEP, // 如果已存在任务，则不重复添加
             cleanupRequest
+        )
+    }
+
+    /**
+     * 调度删除同步任务。
+     * 建议在用户点击删除并确认后立即调用。
+     */
+    fun scheduleDeletion(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val deleteRequest = OneTimeWorkRequest.Builder(DeleteWorker::class.java)
+            .setConstraints(constraints)
+            // 删除操作通常需要尽快执行，可以使用 Expedited (加急)
+            // 注意：Android 12+ 使用 Expedited 需要额外配置前台服务通知，这里简化为普通请求
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                10, TimeUnit.SECONDS // 失败后较快重试
+            )
+            .build()
+
+        // 使用 APPEND_OR_REPLACE 策略：
+        // 如果已有删除任务在跑，就把新的追加到后面，确保按顺序执行
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "InspectionTaskDelete",
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            deleteRequest
         )
     }
 }

@@ -9,6 +9,7 @@ import {
   CloudOff,
   CloudUpload,
   Trash2,
+  AlertCircle,
 } from "lucide-react";
 
 interface TaskCardProps {
@@ -25,12 +26,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const startX = useRef(0);
   const currentX = useRef(0);
   const deleteBtnWidth = 80;
 
+  // 当滑动关闭时，重置确认状态
+  useEffect(() => {
+    if (!isOpen) {
+      setIsConfirming(false);
+    }
+  }, [isOpen]);
+
+  // --- 触摸事件处理 (仅保留移动端逻辑) ---
   const handleTouchStart = (e: React.TouchEvent) => {
     if (isDeleting) return;
     startX.current = e.touches[0].clientX;
@@ -42,13 +52,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     currentX.current = e.touches[0].clientX;
     const diff = currentX.current - startX.current;
 
-    // Logic for swiping left
     if (isOpen) {
-      // If already open, allow sliding back to close or further left with damping
+      // 如果已经打开，允许向右滑回去
       const newOffset = -deleteBtnWidth + diff;
       setSwipeOffset(Math.min(0, newOffset));
     } else if (diff < 0) {
-      // Swiping left to open
+      // 如果是关闭状态，仅允许向左滑
       setSwipeOffset(Math.max(-deleteBtnWidth - 20, diff));
     }
   };
@@ -57,6 +66,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     if (isDeleting) return;
     setIsSwiping(false);
 
+    // 阈值判断：滑过按钮宽度的一半则自动展开
     if (swipeOffset < -deleteBtnWidth / 2) {
       setSwipeOffset(-deleteBtnWidth);
       setIsOpen(true);
@@ -67,22 +77,45 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   };
 
   const handleDeleteClick = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    // Execute visual delete animation
-    setIsDeleting(true);
-    // After animation, we could call an onDelete handler here
+
+    if (!isConfirming) {
+      // 第一步：进入确认状态 (变橙色 + 弹跳图标)
+      setIsConfirming(true);
+    } else {
+      // 第二步：确认删除
+
+      // 1. 执行视觉删除动画 (卡片收缩消失)
+      setIsDeleting(true);
+
+      const safeTaskId = String(task.taskId);
+      console.log("正在请求原生删除任务: " + safeTaskId);
+
+      // 2. 调用安卓原生接口
+      if (window.AndroidNative && window.AndroidNative.deleteTask) {
+        window.AndroidNative.deleteTask(safeTaskId);
+      } else {
+        console.warn("未检测到 AndroidNative 接口，无法执行物理删除");
+      }
+    }
   };
 
-  const handleCardClick = () => {
+  const handleCardClick = (e: React.MouseEvent) => {
+    // 如果侧滑菜单打开中，点击卡片任何位置都视为“关闭菜单”
     if (isOpen) {
+      e.preventDefault();
       setSwipeOffset(0);
       setIsOpen(false);
+      setIsConfirming(false);
     } else if (!isDeleting) {
+      // 正常跳转
       onTaskClick(task);
     }
   };
 
   const handleSyncClick = (e: React.MouseEvent, state: number) => {
+    e.preventDefault();
     e.stopPropagation();
     if (!isOpen) {
       onSyncStatusClick(state);
@@ -139,15 +172,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
   return (
     <div
-      className={`relative mb-3 transition-all duration-300 ease-out ${
+      className={`relative mb-3 transition-all duration-500 cubic-bezier(0.16, 1, 0.3, 1) ${
         isDeleting
-          ? "opacity-0 scale-95 h-0 mb-0 pointer-events-none"
+          ? "opacity-0 scale-90 -translate-x-full h-0 mb-0 pointer-events-none"
           : "h-auto opacity-100 scale-100"
       }`}
     >
-      {/* Background Delete Action */}
+      {/* 背景层：删除/确认操作按钮 */}
       <div
-        className="absolute inset-y-0 right-0 flex items-center justify-center bg-red-500 rounded-xl transition-opacity duration-200"
+        className={`absolute inset-y-0 right-0 flex items-center justify-center rounded-xl transition-all duration-300 ease-in-out ${
+          isConfirming ? "bg-orange-500" : "bg-red-500"
+        }`}
         style={{
           width: `${deleteBtnWidth}px`,
           opacity: swipeOffset < 0 ? 1 : 0,
@@ -155,20 +190,34 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       >
         <button
           onClick={handleDeleteClick}
-          className="w-full h-full flex flex-col items-center justify-center text-white active:bg-red-600 transition-colors rounded-r-xl"
+          // 防止点击按钮本身触发卡片的点击事件（尽管有z-index，但为了保险）
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="w-full h-full flex flex-col items-center justify-center text-white active:brightness-90 transition-all rounded-r-xl overflow-hidden"
         >
-          <Trash2 className="w-6 h-6 mb-1" />
-          <span className="text-[10px] font-bold">删除</span>
+          {isConfirming ? (
+            <>
+              <AlertCircle className="w-6 h-6 mb-1 animate-bounce" />
+              <span className="text-[10px] font-bold whitespace-nowrap px-1">
+                确认删除?
+              </span>
+            </>
+          ) : (
+            <>
+              <Trash2 className="w-6 h-6 mb-1" />
+              <span className="text-[10px] font-bold">删除</span>
+            </>
+          )}
         </button>
       </div>
 
-      {/* Main Card Content */}
+      {/* 主体卡片 */}
       <div
         onClick={handleCardClick}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="relative bg-white rounded-xl p-4 shadow-sm border border-slate-100 active:bg-slate-50 transition-transform duration-200 cursor-pointer z-10"
+        className="relative bg-white rounded-xl p-4 shadow-sm border border-slate-100 active:bg-slate-50 transition-transform duration-200 cursor-pointer z-10 select-none"
         style={{
           transform: `translateX(${swipeOffset}px)`,
           transition: isSwiping

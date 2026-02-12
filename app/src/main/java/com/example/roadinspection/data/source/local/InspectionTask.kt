@@ -14,7 +14,10 @@ import java.util.UUID
  */
 @Entity(
     tableName = "inspection_tasks",
-    indices = [Index(value = ["inspector_id"])]
+    // 创建联合索引
+    indices = [
+        Index(value = ["inspector_id", "sync_state"], name = "index_user_sync_status")
+    ]
 )
 data class InspectionTask(
     /**

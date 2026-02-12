@@ -96,7 +96,13 @@ const taskSchema = new Schema({
 
   // 记录插入时间
   createdAt: { type: Date, default: Date.now },
+
+  // 软删除字段
+  // null = 有效; 有日期 = 已删除
+  deletedAt: { type: Date, default: null },
 });
+
+taskSchema.index({ deletedAt: 1 });
 
 // ============================================================
 // 3. 记录模型 (Record)
@@ -127,10 +133,15 @@ const recordSchema = new Schema({
   iri: { type: Number, default: null },
 
   pavementDistress: { type: String, default: null },
+
+  // 软删除字段 (随任务级联删除)
+  deletedAt: { type: Date, default: null },
 });
 
 // 创建 2dsphere 空间索引 (支持 $near, $geoWithin 查询)
 recordSchema.index({ location: "2dsphere" });
+
+recordSchema.index({ deletedAt: 1 });
 
 // ============================================================
 // 导出模型
