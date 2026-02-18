@@ -1,6 +1,7 @@
 package com.example.roadinspection.domain.capture
 
 import android.content.Context
+import android.location.Location
 import android.net.Uri
 import android.util.Log
 import com.example.roadinspection.data.repository.InspectionRepository
@@ -142,7 +143,7 @@ class CaptureController(
     private fun performCombinedAction(isAuto: Boolean, segmentLength: Float) {
         val taskId = currentTaskId ?: return
         val location = locationProvider.getLocationFlow().value ?: return
-        val speedKmh = (location.speed) * 3.6f
+        val speedKmh = getCalculatedSpeed(location) * 3.6f
 
         // 1. 计算 IRI (同步执行，非阻塞但轻量)
         val iriResult = iriCalculator.computeAndClear(
@@ -210,5 +211,28 @@ class CaptureController(
                 onImageSaved(uri)
             }
         }, { Log.e(TAG, "手动拍照失败") })
+    }
+
+    private var lastLocation: Location? = null
+
+    private fun getCalculatedSpeed(currentLocation: Location): Float {
+        // 1. 优先使用系统原生速度
+        if (currentLocation.hasSpeed() && currentLocation.speed > 0.5f) {
+            return currentLocation.speed
+        }
+
+        // 2. 兜底方案：计算两点间的位移速度
+        val prev = lastLocation
+        lastLocation = currentLocation
+        if (prev != null) {
+            val dist = currentLocation.distanceTo(prev) // 米
+            val timeSec = (currentLocation.time - prev.time) / 1000f
+            if (timeSec > 0.1f) {
+                val calcSpeed = dist / timeSec
+                // 简单滤波：如果算出 300km/h 显然是 GPS 漂移，丢弃
+                if (calcSpeed < 50f) return calcSpeed
+            }
+        }
+        return 0f
     }
 }

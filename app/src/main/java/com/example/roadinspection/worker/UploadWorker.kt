@@ -140,6 +140,7 @@ class UploadWorker(
                     val serverUrl = currentRecord.serverUrl
                     if (currentRecord.syncStatus == 1 && serverUrl != null) {
                         Log.d(TAG, "提交元数据到后端: ${currentRecord.recordId}")
+                        Log.d(TAG, "IRI: ${currentRecord.iri}")
                         val req = SubmitRecordReq(
                             recordId = currentRecord.recordId,
                             taskId = currentRecord.taskId,

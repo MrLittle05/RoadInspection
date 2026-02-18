@@ -403,7 +403,9 @@ private fun RecordDto.toEntity(): InspectionRecord {
         captureTime = this.captureTime,
         latitude = this.rawLat,
         longitude = this.rawLng,
-        address = this.address
+        address = this.address,
+        iri = this.iri,
+        pavementDistress = this.pavementDistress
     )
 }
 

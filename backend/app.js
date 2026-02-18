@@ -599,7 +599,7 @@ router.post("/api/record/submit", async (ctx) => {
   // 日志作用：排查 "位置漂移" 问题。
   // 如果用户投诉定位不准，可对比此处日志中的 Loc 与用户实际位置。
   console.log(
-    `📷 [Record] 收到图片: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}]`,
+    `📷 [Record] 收到记录: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}], IRI=${body.iri}`,
   );
 
   // Data Transformation (数据清洗与适配)

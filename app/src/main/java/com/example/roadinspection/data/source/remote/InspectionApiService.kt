@@ -40,7 +40,9 @@ data class RecordDto(
     val captureTime: Long,
     val address: String,
     val rawLat: Double,
-    val rawLng: Double
+    val rawLng: Double,
+    val iri: Double?,
+    val pavementDistress: String?
 )
 
 data class UserDto(
