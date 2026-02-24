@@ -240,6 +240,38 @@ fun CameraPreviewLayer(
                     }
                 })
                 previewView.setOnTouchListener { _, event -> scaleDetector.onTouchEvent(event); true }
+
+                // 🟢 核心增强：强制中心点连续自动对焦
+                // 使用 SurfaceOrientedMeteringPointFactory 构建一个相对坐标系 (1f x 1f)
+                val factory = androidx.camera.core.SurfaceOrientedMeteringPointFactory(1f, 1f)
+                // 坐标 (0.5f, 0.5f) 就是绝对的画面正中心
+                val centerPoint = factory.createPoint(0.5f, 0.5f)
+
+                // 创建对焦动作：FLAG_AF 代表自动对焦
+                // 注：不调用 setAutoCancelDuration，让它永久保持在这个点进行连续对焦
+                val action = androidx.camera.core.FocusMeteringAction.Builder(
+                    centerPoint,
+                    androidx.camera.core.FocusMeteringAction.FLAG_AF
+                ).build()
+
+                // 启动对焦
+                cam.cameraControl.startFocusAndMetering(action)
+
+                val exposureState = cam.cameraInfo.exposureState
+                if (exposureState.isExposureCompensationSupported) {
+                    val range = exposureState.exposureCompensationRange
+                    // 目标补偿值：-1 档位 (稍微压暗画面，保留高光细节)
+                    // 如果你想更暗一点测试，可以换成 -2，前提是 range.contains(-2)
+                    val targetExposure = -1
+
+                    if (range.contains(targetExposure)) {
+                        cam.cameraControl.setExposureCompensationIndex(targetExposure)
+                        Log.d("Camera", "☀️ 已将曝光补偿锁定为: $targetExposure")
+                    } else {
+                        Log.w("Camera", "☀️ 当前设备不支持 -1 档曝光补偿，支持范围: $range")
+                    }
+                }
+
             } catch (e: Exception) {
                 Log.e("Camera", "Bind failed", e)
             }
