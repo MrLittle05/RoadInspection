@@ -174,7 +174,7 @@ class CaptureController(
                         captureTime = System.currentTimeMillis(),
                         latitude = location.latitude,
                         longitude = location.longitude,
-                        address = addressStr,
+                        address = addressStr.takeUnless { it == "未知路段 (网络查询失败)" },
                         iri = iriResult?.iriValue?.toDouble() ?: 0.0
                     )
 
