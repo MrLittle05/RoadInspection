@@ -12,14 +12,16 @@ import com.example.roadinspection.domain.iri.IriCalculator
 import com.example.roadinspection.domain.location.LocationProvider
 import com.example.roadinspection.worker.WorkManagerConfig
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 综合巡检控制器 (Visual + Data)
  *
  * 职责：
- * 1. 监听位置和速度
+ * 1. 监听位置和速度 (50ms高频轮询，保障软件插值精度)
  * 2. 智能切换“里程触发”与“时间预测”模式
- * 3. 同频执行：拍照 + IRI计算 + 数据持久化 (10m 间隔)
+ * 3. 相机状态管理 (防卡死、积压跳过机制)
+ * 4. 同频执行：拍照 + IRI计算 + 数据持久化 (10m 间隔)
  */
 class CaptureController(
     private val context: Context,
@@ -37,17 +39,16 @@ class CaptureController(
 
     // 状态变量
     private var currentTaskId: String? = null
-
-    // 合并后的里程标尺 (用于同时控制拍照和IRI)
     private var lastActionDistance = 0f
+
+    // --- main 分支引入的并发控制 ---
+    private val isCapturing = AtomicBoolean(false)
+    private val MAX_RETRY_COUNT = 40 // 50ms * 40 = 2秒熔断
+    private var retryCount = 0
 
     companion object {
         private const val TAG = "CaptureController"
-
-        // 统一间隔：10米
         private const val ACTION_INTERVAL_METERS = 10.0f
-
-        // 速度阈值：36 km/h (10 m/s) 以上视为高速，启用预测模式
         private const val HIGH_SPEED_THRESHOLD_MS = 10.0f
     }
 
@@ -57,10 +58,6 @@ class CaptureController(
     fun start(taskId: String) {
         this.currentTaskId = taskId
 
-        // 初始化里程标尺
-        // 注意：如果是 Resume，这里应该保持之前的状态吗？
-        // 如果是全新 Start，locationProvider 可能会重置 distance 为 0。
-        // 这里假设 locationProvider.distance 是从 0 开始累加的当前段里程。
         val currentDist = locationProvider.getDistanceFlow().value
         if (lastActionDistance == 0f || currentDist < lastActionDistance) {
             lastActionDistance = currentDist
@@ -69,89 +66,113 @@ class CaptureController(
         Log.i(TAG, "🟢 综合巡检流已启动 (TaskId: $taskId, StartDist: $lastActionDistance)")
 
         controlJob?.cancel()
-        controlJob = scope.launch {
+        controlJob = scope.launch(Dispatchers.Default) {
             while (isActive) {
                 val location = locationProvider.getLocationFlow().value
                 val currentDistance = locationProvider.getDistanceFlow().value
                 val speed = location?.speed ?: 0f
+                val distanceGap = currentDistance - lastActionDistance
 
-                // 计算自上次动作以来的增量距离
-                val deltaDistance = currentDistance - lastActionDistance
+                // 1. 极端情况防御 (From main): 里程跳变过大，重置标尺
+                if (distanceGap > 100) {
+                    Log.w(TAG, "🚀 里程跳变过大 ($distanceGap m)，重置标尺")
+                    lastActionDistance = currentDistance
+                    continue
+                }
 
                 if (speed > HIGH_SPEED_THRESHOLD_MS) {
                     // === 高速模式 (时间预测) ===
-                    // 计算走完 10m 需要多少毫秒
-                    val msPerInterval = ((ACTION_INTERVAL_METERS / speed) * 1000).toLong()
+                    if (isCapturing.get()) {
+                        handleCameraBusy(currentDistance)
+                        delay(50)
+                        continue
+                    }
 
-                    // 硬件限制保护：如果太快(如>200km/h)，强制至少间隔 200ms
+                    val msPerInterval = ((ACTION_INTERVAL_METERS / speed) * 1000).toLong()
                     val safeDelay = msPerInterval.coerceAtLeast(200L)
 
                     Log.v(TAG, "🚀 高速模式 ($speed m/s): 预测将在 ${safeDelay}ms 后触发动作")
                     delay(safeDelay)
 
-                    // 时间到了，强制触发动作
-                    // 此时 GPS 可能还没更新 distance，我们手动推进标尺
+                    isCapturing.set(true)
+                    retryCount = 0
                     lastActionDistance += ACTION_INTERVAL_METERS
-
-                    // 执行综合动作 (传入预估的里程段长，通常就是间隔值)
                     performCombinedAction(isAuto = true, segmentLength = ACTION_INTERVAL_METERS)
 
                 } else {
                     // === 低速模式 (轮询检测) ===
-                    if (deltaDistance >= ACTION_INTERVAL_METERS) {
-                        Log.d(TAG, "🐢 低速模式: 里程达标 ($deltaDistance >= $ACTION_INTERVAL_METERS)，触发动作")
+                    if (distanceGap >= ACTION_INTERVAL_METERS) {
+                        if (isCapturing.get()) {
+                            handleCameraBusy(currentDistance)
+                        } else {
+                            Log.d(TAG, "🐢 低速模式: 里程达标 ($distanceGap >= $ACTION_INTERVAL_METERS)")
+                            isCapturing.set(true)
+                            retryCount = 0
 
-                        // 更新标尺
-                        lastActionDistance = currentDistance
-
-                        // 执行综合动作
-                        performCombinedAction(isAuto = true, segmentLength = deltaDistance)
+                            // 核心修复 (From main): 严格推进 10m，避免用 currentDistance 导致累积误差
+                            lastActionDistance += ACTION_INTERVAL_METERS
+                            performCombinedAction(isAuto = true, segmentLength = distanceGap)
+                        }
                     }
-                    // 轮询间隔
-                    delay(500)
                 }
+
+                // 保持 50ms 高频轮询，提升软件插值定距的精度 (From main)
+                delay(50)
             }
         }
     }
 
-    /**
-     * 停止巡检流
-     */
     fun stop() {
         controlJob?.cancel()
         currentTaskId = null
-        lastActionDistance = 0f // 重置
+        lastActionDistance = 0f
+        isCapturing.set(false) // 安全起见，停止时强制释放锁
         Log.i(TAG, "🔴 综合巡检流已停止")
     }
 
-    /**
-     * 手动触发
-     */
     fun manualCapture() {
         if (currentTaskId == null) return
-        // 手动拍照通常不计算 IRI (因为距离不足)，或者计算了也只算极短距离的
-        // 这里策略是：手动只拍照，不结算 IRI，以免打乱自动流的 buffer
+        if (isCapturing.get()) {
+            Log.w(TAG, "⚠️ 相机忙碌中，本次手动触发被忽略")
+            return
+        }
+
+        isCapturing.set(true)
         performPhotoOnly(isAuto = false)
     }
 
     // ================== 私有动作实现 ==================
 
     /**
+     * 处理相机忙碌与熔断逻辑 (抽取自 main)
+     */
+    private fun handleCameraBusy(currentDistance: Float) {
+        retryCount++
+        if (retryCount < MAX_RETRY_COUNT) {
+            if (retryCount % 10 == 0) Log.v(TAG, "⏳ 相机忙碌，等待中... ($retryCount/$MAX_RETRY_COUNT)")
+        } else {
+            Log.e(TAG, "⚠️ 相机卡死或处理过慢，触发熔断强制跳过！")
+            isCapturing.set(false)
+            // 放弃积压的照片，把标尺拉到当前位置，保住后续流程
+            lastActionDistance = currentDistance
+            retryCount = 0
+        }
+    }
+
+    /**
      * 执行综合动作：计算IRI -> 拍照 -> 存库
-     * @param segmentLength 本次计算涵盖的距离 (用于 IRI 归一化)
      */
     private fun performCombinedAction(isAuto: Boolean, segmentLength: Float) {
         val taskId = currentTaskId ?: return
         val location = locationProvider.getLocationFlow().value ?: return
         val speedKmh = getCalculatedSpeed(location) * 3.6f
 
-        // 1. 计算 IRI (同步执行，非阻塞但轻量)
+        // 1. 计算 IRI
         val iriResult = iriCalculator.computeAndClear(
             avgSpeedKmh = speedKmh,
             distanceMeters = segmentLength
         )
 
-        // 传递 IRI 给 UI
         if (iriResult != null) {
             onIriCalculated(iriResult)
         } else {
@@ -162,6 +183,8 @@ class CaptureController(
         cameraHelper.takePhoto(
             isAuto = isAuto,
             onSuccess = { uri ->
+                isCapturing.set(false) // 🟢 合并增补：释放相机锁
+
                 // 3. 开启 IO 协程存库
                 scope.launch(Dispatchers.IO) {
                     val addressStr = try {
@@ -185,7 +208,10 @@ class CaptureController(
                     Log.d(TAG, "✅ 记录已保存: IRI=${record.iri}, Path=$uri")
                 }
             },
-            onError = { e -> Log.e(TAG, "❌ 定距拍照失败: $e") }
+            onError = { e ->
+                isCapturing.set(false) // 🟢 合并增补：异常时也必须释放锁
+                Log.e(TAG, "❌ 定距拍照失败: $e")
+            }
         )
     }
 
@@ -197,6 +223,8 @@ class CaptureController(
         val location = locationProvider.getLocationFlow().value ?: return
 
         cameraHelper.takePhoto(isAuto, { uri ->
+            isCapturing.set(false) // 🟢 合并增补：释放相机锁
+
             scope.launch(Dispatchers.IO) {
                 val record = InspectionRecord(
                     taskId = taskId,
@@ -205,31 +233,31 @@ class CaptureController(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     address = "手动触发",
-                    iri = 0.0 // 手动触发暂无 IRI
+                    iri = 0.0
                 )
                 repository.saveRecord(record)
                 onImageSaved(uri)
             }
-        }, { Log.e(TAG, "手动拍照失败") })
+        }, {
+            isCapturing.set(false) // 🟢 合并增补：异常释放锁
+            Log.e(TAG, "手动拍照失败")
+        })
     }
 
     private var lastLocation: Location? = null
 
     private fun getCalculatedSpeed(currentLocation: Location): Float {
-        // 1. 优先使用系统原生速度
         if (currentLocation.hasSpeed() && currentLocation.speed > 0.5f) {
             return currentLocation.speed
         }
 
-        // 2. 兜底方案：计算两点间的位移速度
         val prev = lastLocation
         lastLocation = currentLocation
         if (prev != null) {
-            val dist = currentLocation.distanceTo(prev) // 米
+            val dist = currentLocation.distanceTo(prev)
             val timeSec = (currentLocation.time - prev.time) / 1000f
             if (timeSec > 0.1f) {
                 val calcSpeed = dist / timeSec
-                // 简单滤波：如果算出 300km/h 显然是 GPS 漂移，丢弃
                 if (calcSpeed < 50f) return calcSpeed
             }
         }

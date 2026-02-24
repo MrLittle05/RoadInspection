@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.gson)
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.amap.api:3dmap-location-search:10.1.600_loc6.5.1_sea9.7.4")
     implementation("org.greenrobot:eventbus:3.3.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
