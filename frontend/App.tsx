@@ -69,6 +69,7 @@ const App: React.FC = () => {
       response: NativeApiResponse<InspectionTask[]>,
     ) => {
       console.log("📂 [App] Native onTasksReceived:", response.msg);
+      console.log(response.data);
 
       if (response.data) {
         setTasks(response.data);
@@ -96,6 +97,7 @@ const App: React.FC = () => {
       response: NativeApiResponse<InspectionRecord[]>,
     ) => {
       console.log("📂 [App] Native onRecordsReceived:", response.msg);
+      console.log(response.data);
 
       if (response.data) {
         setTaskRecords(response.data);
@@ -130,6 +132,9 @@ const App: React.FC = () => {
       // 3. 提示用户
       if (response.code === 200) {
         showToast("已退出", "您已安全退出登录", "success");
+      } else if (response.code === 403) {
+        // 这里对应后端的 403 和 Android 发来的 ForceLogout 事件
+        showToast("登录过期", response.msg || "请重新登录", "info");
       } else {
         // 这种情况理论上很少见，因为本地清理通常是强制成功的
         showToast("已退出", "离线模式强制登出", "info");
@@ -392,10 +397,7 @@ const App: React.FC = () => {
     const url = `./inspection.html?${params.toString()}`;
 
     if (window.AndroidNative && window.AndroidNative.startInspectionActivity) {
-      window.AndroidNative.startInspectionActivity(url);
-    } else {
-      // 兼容在浏览器调试的情况
-      window.location.href = url;
+      window.AndroidNative.startInspectionActivity(url, null);
     }
   };
 

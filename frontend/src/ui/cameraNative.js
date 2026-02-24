@@ -31,6 +31,20 @@ const UI = {
     elements.iriCanvas = document.getElementById("iri-canvas");
   },
 
+  restoreState: (data) => {
+    const distance = data.distance || 0;
+
+    UI.updateTotalDistance(distance);
+
+    // 2. 恢复 IRI 图表的当前里程基准
+    // 这样新来的 IRI 数据（例如 dist=5010m）才能正确接在图表后面
+    IRI_CONFIG.currentTotalDist = distance;
+
+    // 3. 清空旧队列（新会话重新绘图，或者如果有历史数据也可以传进来重绘）
+    // 目前简单处理：清空队列，从当前里程开始画新线
+    IRI_CONFIG.dataQueue = [];
+  },
+
   updateTotalDistance: (newTotalDistance) => {
     if (newTotalDistance !== undefined && newTotalDistance !== null) {
       elements.totalDistance.innerText = (newTotalDistance / 1000).toFixed(3);
@@ -156,11 +170,11 @@ function drawIriChart() {
     // 窗口起始距离 = 当前总里程 - 500m
     const windowStart = Math.max(
       0,
-      IRI_CONFIG.currentTotalDist - IRI_CONFIG.maxDistance
+      IRI_CONFIG.currentTotalDist - IRI_CONFIG.maxDistance,
     );
     const windowEnd = Math.max(
       IRI_CONFIG.maxDistance,
-      IRI_CONFIG.currentTotalDist
+      IRI_CONFIG.currentTotalDist,
     );
 
     // 归一化 (0~1)
@@ -220,7 +234,7 @@ function drawIriChart() {
   // 计算当前窗口的里程范围
   const startDist = Math.max(
     0,
-    IRI_CONFIG.currentTotalDist - IRI_CONFIG.maxDistance
+    IRI_CONFIG.currentTotalDist - IRI_CONFIG.maxDistance,
   );
   const endDist = Math.max(IRI_CONFIG.maxDistance, IRI_CONFIG.currentTotalDist);
 
@@ -233,7 +247,7 @@ function drawIriChart() {
   ctx.fillText(
     endLabel,
     margin.left + graphWidth,
-    margin.top + graphHeight + 8
+    margin.top + graphHeight + 8,
   );
 
   // 3.3 绘制坐标轴实线 (左轴和底轴)

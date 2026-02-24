@@ -11,25 +11,23 @@ const elements = {
   aiBtn: null,
   timer: null,
   distValRow: null,
+  galleryWrapper: null,
+  pauseWrapper: null,
+  iconPause: null,
+  iconResume: null,
+  exitModal: null,
+  btnModalResume: null,
+  btnModalSaveExit: null,
 };
 
 const states = {
   currentMode: "video",
   isRecording: false,
+  isPaused: false,
   recordSeconds: 0,
   currentRotationState: 0,
   timerInterval: null,
 };
-
-if (!window.AndroidNative) {
-  window.AndroidNative = {
-    startInspection: () => console.log("Mock: Start Inspection"),
-    stopInspection: () => console.log("Mock: Stop Inspection"),
-    manualCapture: () => console.log("Mock: Take Photo"),
-    showToast: (msg) => console.log("Toast: " + msg),
-    openGallery: (type) => console.log("Open Gallery: " + type),
-  };
-}
 
 const UI = {
   initElements: () => {
@@ -43,6 +41,19 @@ const UI = {
     elements.aiBtn = document.getElementById("btn-ai");
     elements.timer = document.getElementById("timer");
     elements.distValRow = document.querySelector(".dist-val-row");
+    elements.galleryWrapper = document.getElementById("gallery-wrapper");
+    elements.pauseWrapper = document.getElementById("pause-wrapper");
+    elements.iconPause = document.getElementById("icon-pause");
+    elements.iconResume = document.getElementById("icon-resume");
+    elements.exitModal = document.getElementById("exit-modal");
+    elements.btnModalResume = document.getElementById("btn-modal-resume");
+    elements.btnModalSaveExit = document.getElementById("btn-modal-save-exit");
+  },
+
+  initJSBridgeCallback: () => {
+    if (window.JSBridge) {
+      window.JSBridge.registerBackPressHandler(UI.onBackProceed);
+    }
   },
 
   bind: (eventName, callback) => {
@@ -73,6 +84,21 @@ const UI = {
         break;
       case "rotation":
         window.addEventListener("deviceorientation", callback);
+        break;
+      case "resume":
+        elements.btnModalResume.addEventListener("click", callback);
+        break;
+      case "saveExit":
+        elements.btnModalSaveExit.addEventListener("click", callback);
+        break;
+    }
+  },
+
+  handleGalleryClick: () => {
+    if (states.isRecording) {
+      togglePause();
+    } else {
+      openGallery();
     }
   },
 
@@ -125,16 +151,15 @@ const UI = {
         startRecording(params.taskName, params.userId);
       } else {
         stopRecording();
+        setTimeout(() => {
+          window.AndroidNative.stopInspectionActivity();
+        }, 1000);
       }
     }
   },
 
   toggleAI: () => {
     window.AndroidNative.showToast("AI 算法配置中");
-  },
-
-  openGallery: () => {
-    window.AndroidNative.openGallery("all");
   },
 
   handleOrientation: (event) => {
@@ -172,7 +197,87 @@ const UI = {
       });
     }
   },
+
+  onBackProceed: () => {
+    if (states.isRecording) {
+      UI.showExitModal();
+    } else {
+      window.AndroidNative.stopInspectionActivity();
+    }
+  },
+
+  showExitModal: () => {
+    elements.exitModal.classList.remove("hidden");
+  },
+
+  dismissExitModal: () => {
+    elements.exitModal.classList.add("hidden");
+  },
+
+  handleSaveAndExit: () => {
+    UI.dismissExitModal();
+    window.AndroidNative.saveInspectionState();
+    setTimeout(() => {
+      window.AndroidNative.stopInspectionActivity();
+    }, 800);
+  },
+
+  restoreState: (data) => {
+    // 1. 恢复状态变量
+    states.isRecording = true;
+    states.isPaused = true;
+    states.recordSeconds = data.seconds || 0;
+
+    // 2. 更新计时器显示
+    updateTimer();
+
+    // 3. 恢复计时器循环
+    startTimerLoop();
+
+    // 3. 更新按钮显示 (显示“恢复”按钮，隐藏“暂停”按钮)
+    elements.galleryWrapper.classList.add("hidden");
+    elements.pauseWrapper.classList.remove("hidden");
+    elements.iconPause.classList.add("hidden");
+    elements.iconResume.classList.remove("hidden");
+
+    // 4. 给快门按钮添加录制样式 (红点)
+    document.getElementById("shutter-btn").classList.add("recording");
+    if (elements.timer) elements.timer.classList.add("active");
+  },
 };
+
+function togglePause() {
+  states.isPaused = !states.isPaused;
+
+  if (states.isPaused) {
+    elements.iconPause.classList.add("hidden");
+    elements.iconResume.classList.remove("hidden");
+    window.AndroidNative.pauseInspection();
+    console.log("Notify Android to PAUSE inspection");
+  } else {
+    elements.iconPause.classList.remove("hidden");
+    elements.iconResume.classList.add("hidden");
+    window.AndroidNative.resumeInspection();
+    console.log("Notify Android to RESUME inspection");
+  }
+}
+
+function startTimerLoop() {
+  // 防止重复启动，先清除旧的
+  if (states.timerInterval) clearInterval(states.timerInterval);
+
+  states.timerInterval = setInterval(() => {
+    // 只有在“录制中”且“非暂停”状态下才累加时间
+    if (states.isRecording && !states.isPaused) {
+      states.recordSeconds++;
+      updateTimer();
+    }
+  }, 1000);
+}
+
+function openGallery() {
+  window.AndroidNative.openGallery("all");
+}
 
 function animateShutter() {
   const btn = document.querySelector(".shutter-inner");
@@ -194,19 +299,25 @@ function startRecording(taskName, userId) {
     return;
   }
   states.isRecording = true;
+  states.isPaused = false;
+
   document.getElementById("shutter-btn").classList.add("recording");
   if (elements.timer) {
     elements.timer.classList.add("active");
   }
+
+  // Toggle Gallery Button to Pause Button
+  elements.galleryWrapper.classList.add("hidden");
+  elements.pauseWrapper.classList.remove("hidden");
+  elements.iconPause.classList.remove("hidden");
+  elements.iconResume.classList.add("hidden");
   window.AndroidNative.startInspection(taskName, userId);
 
   // 启动计时器
   states.recordSeconds = 0;
   updateTimer();
-  states.timerInterval = setInterval(() => {
-    states.recordSeconds++;
-    updateTimer();
-  }, 1000);
+
+  startTimerLoop();
 
   // 重置图表数据
   nativeUI.resetIriChart();
@@ -222,6 +333,9 @@ function stopRecording() {
   if (elements.timer) {
     elements.timer.classList.remove("active");
   }
+
+  elements.pauseWrapper.classList.add("hidden");
+  elements.galleryWrapper.classList.remove("hidden");
   window.AndroidNative.stopInspection();
   states.recordSeconds = 0;
   updateTimer();

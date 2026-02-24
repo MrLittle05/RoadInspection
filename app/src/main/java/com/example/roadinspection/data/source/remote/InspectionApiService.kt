@@ -40,7 +40,9 @@ data class RecordDto(
     val captureTime: Long,
     val address: String,
     val rawLat: Double,
-    val rawLng: Double
+    val rawLng: Double,
+    val iri: Double?,
+    val pavementDistress: String?
 )
 
 data class UserDto(
@@ -197,4 +199,12 @@ interface InspectionApiService {
 
     @POST("/api/auth/logout")
     suspend fun logout(@Body req: LogoutReq): ApiResponse<Unit>
+
+    /**
+     * 删除任务。
+     * 即使后端执行软删除，客户端仍发送 DELETE 请求。
+     * 后端响应 200 (OK) 或 404 (Not Found) 都视为删除成功。
+     */
+    @retrofit2.http.DELETE("/api/task/{taskId}")
+    suspend fun deleteTask(@Path("taskId") taskId: String, @Query("userId") userId: String): ApiResponse<Unit>
 }

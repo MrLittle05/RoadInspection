@@ -350,10 +350,19 @@ router.post("/api/auth/refresh", async (ctx) => {
       },
     };
   } catch (err) {
-    // Refresh Token 过期或格式错误
-    console.warn(`❌ [Refresh] 刷新失败: ${err.message}`);
-    ctx.status = 403; // 返回 403 触发前端强制登出
-    ctx.body = { code: 403, message: "登录凭证已过期，请重新登录" };
+    console.warn(`❌ [Refresh] 异常: ${err.message}`);
+
+    // 1. 如果是 JWT 相关的错误，说明是凭证问题 -> 403
+    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+      ctx.status = 403;
+      ctx.body = { code: 403, message: "登录凭证无效，请重新登录" };
+    }
+    // 2. 否则，视作服务器内部错误 -> 500 (或其他状态码，不要用 403)
+    else {
+      console.error(err); // 打印具体堆栈
+      ctx.status = 500;
+      ctx.body = { code: 500, message: "服务器繁忙，请稍后重试" };
+    }
   }
 });
 
@@ -590,7 +599,7 @@ router.post("/api/record/submit", async (ctx) => {
   // 日志作用：排查 "位置漂移" 问题。
   // 如果用户投诉定位不准，可对比此处日志中的 Loc 与用户实际位置。
   console.log(
-    `📷 [Record] 收到图片: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}]`,
+    `📷 [Record] 收到记录: Task=${body.taskId}, Loc=[${body.longitude}, ${body.latitude}], IRI=${body.iri}`,
   );
 
   // Data Transformation (数据清洗与适配)
@@ -692,7 +701,10 @@ router.get("/api/task/list", async (ctx) => {
     // 3. 数据库查询
     // 过滤条件: inspectorId 匹配 userId
     // 排序: startTime: -1 (降序/最新的在最上面)
-    const tasks = await Task.find({ inspectorId: userId }).sort({
+    const tasks = await Task.find({
+      inspectorId: userId,
+      deletedAt: null,
+    }).sort({
       startTime: -1,
     });
 
@@ -737,9 +749,11 @@ router.get("/api/record/list", async (ctx) => {
     // 3. 数据库查询
     // find: 查找所有匹配文档
     // sort: 按拍摄时间 (captureTime) 正序排列，方便前端按时间轴展示
-    const records = await Record.find({ taskId: taskId }).sort({
-      captureTime: 1,
-    });
+    const records = await Record.find({ taskId: taskId, deletedAt: null }).sort(
+      {
+        captureTime: 1,
+      },
+    );
 
     // 4. 组装响应
     const count = records.length;
@@ -754,6 +768,62 @@ router.get("/api/record/list", async (ctx) => {
     console.error(`❌ [Record List] 查询出错 (ID: ${taskId}):`, e);
     ctx.status = 500;
     ctx.body = { code: 500, message: "获取记录失败，请稍后重试" };
+  }
+});
+
+/**
+ * @route DELETE /api/task/:taskId
+ * @summary 软删除任务及其关联数据
+ * @description
+ * 1. 校验 userId 是否存在。
+ * 2. 查找 taskId 且 inspectorId 匹配的任务 (权限控制)。
+ * 3. 级联更新 deletedAt。
+ */
+router.delete("/api/task/:taskId", async (ctx) => {
+  const { taskId } = ctx.params;
+  const { userId } = ctx.query;
+
+  // 1. 参数校验
+  if (!userId) {
+    ctx.status = 400;
+    ctx.body = { code: 400, message: "参数 userId 不能为空" };
+    return;
+  }
+
+  console.log(`🗑️ [Task Delete] 请求删除: ${taskId} (User: ${userId})`);
+
+  try {
+    const now = new Date();
+
+    // 2. 软删除任务 (增加 inspectorId 匹配条件，确保只能删自己的)
+    const taskRes = await Task.updateOne(
+      { taskId: taskId, inspectorId: userId },
+      { $set: { deletedAt: now } },
+    );
+
+    // 3. 结果判断
+    if (taskRes.matchedCount === 0) {
+      // 没匹配到，可能是任务不存在，也可能是 userId 对不上（无权删除）
+      console.warn(`⚠️ [Task Delete] 任务不存在或无权删除: ${taskId}`);
+      ctx.status = 404;
+      ctx.body = { code: 404, message: "任务不存在或无权删除" };
+      return; // ⛔ 任务没删掉，绝对不能去删 Records
+    }
+
+    // 4. 级联软删除关联的 Record
+    const recordRes = await Record.updateMany(
+      { taskId: taskId },
+      { $set: { deletedAt: now } },
+    );
+
+    console.log(
+      `✅ [Task Delete] 删除成功: 任务x${taskRes.modifiedCount}, 记录x${recordRes.modifiedCount}`,
+    );
+    ctx.body = { code: 200, message: "删除成功" };
+  } catch (e) {
+    console.error(`❌ [Task Delete] 异常:`, e);
+    ctx.status = 500;
+    ctx.body = { code: 500, message: "删除失败" };
   }
 });
 

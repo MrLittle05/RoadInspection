@@ -3,6 +3,7 @@ package com.example.roadinspection.data.source.local
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 import java.util.UUID
 
 /**
@@ -11,7 +12,13 @@ import java.util.UUID
  * 代表一次完整的巡检活动（从“开始巡检”到“结束巡检”）。
  * 作为 [InspectionRecord] 的父表，用于聚合和管理具体的巡检记录。
  */
-@Entity(tableName = "inspection_tasks")
+@Entity(
+    tableName = "inspection_tasks",
+    // 创建联合索引
+    indices = [
+        Index(value = ["inspector_id", "sync_state"], name = "index_user_sync_status")
+    ]
+)
 data class InspectionTask(
     /**
      * 任务全局唯一标识符 (UUID)。
@@ -60,5 +67,13 @@ data class InspectionTask(
      * 2 = 已同步且已结束 (Finalized)   -> 服务器已更新 end_time
     **/
     @ColumnInfo(name = "sync_state")
-    val syncState: Int = 0
+    val syncState: Int = 0,
+
+    /** 当前累计巡检里程 (米) */
+    @ColumnInfo(name = "current_distance")
+    val currentDistance: Float = 0f,
+
+    /** 当前累计巡检时长 (秒) */
+    @ColumnInfo(name = "current_duration")
+    val currentDuration: Long = 0L
 )

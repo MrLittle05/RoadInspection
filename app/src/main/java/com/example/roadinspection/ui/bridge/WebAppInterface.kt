@@ -25,19 +25,25 @@ interface AndroidNativeApi {
     fun saveTokens(accessToken: String, refreshToken: String)
 
     @JavascriptInterface
-    fun clearTokens()
-
-    @JavascriptInterface
-    fun getAccessToken(): String
-
-    @JavascriptInterface
-    fun startInspectionActivity(url: String)
+    fun startInspectionActivity(url: String, resumeTaskId: String?)
 
     @JavascriptInterface
     fun startInspection(title: String?, currentUserId: String)
 
     @JavascriptInterface
+    fun pauseInspection()
+
+    @JavascriptInterface
+    fun resumeInspection()
+
+    @JavascriptInterface
     fun stopInspection()
+
+    @JavascriptInterface
+    fun stopInspectionActivity()
+
+    @JavascriptInterface
+    fun saveInspectionState()
 
     @JavascriptInterface
     fun manualCapture()
@@ -56,6 +62,9 @@ interface AndroidNativeApi {
 
     @JavascriptInterface
     fun fetchRecords(taskId: String)
+
+    @JavascriptInterface
+    fun deleteTask(taskId: String)
 
     @JavascriptInterface
     fun logout()

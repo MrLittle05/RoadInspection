@@ -1,6 +1,5 @@
 package com.example.roadinspection.data.repository
 
-import android.content.Context
 import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
@@ -11,7 +10,6 @@ import com.example.roadinspection.data.source.remote.TaskDto
 import com.example.roadinspection.data.source.remote.RecordDto
 import com.example.roadinspection.data.source.remote.UpdateProfileReq
 import com.example.roadinspection.data.source.remote.UserDto
-import com.example.roadinspection.di.NetworkModule
 import com.example.roadinspection.di.NetworkModule.api
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -62,14 +60,18 @@ class InspectionRepository(private val dao: InspectionDao) {
     /**
      * 获取所有尚未同步到服务器的任务 (syncState = 0)。
      * WorkManager 将遍历此列表，调用 /api/task/create 接口。
+     *
+     * @param userId 当前用户 ID
      */
-    suspend fun getUnsyncedTasks(): List<InspectionTask> = dao.getUnsyncedTasks()
+    suspend fun getUnsyncedTasks(userId: String): List<InspectionTask> = dao.getUnsyncedTasks(userId)
 
     /**
      * 获取本地已完成，但服务器状态仍为“进行中”的任务 (isFinished = 1 AND syncState = 1)。
      * WorkManager 将遍历此列表，调用 /api/task/finish 接口。
+     *
+     * @param userId 当前用户 ID
      */
-    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask> = dao.getFinishedButNotSyncedTasks()
+    suspend fun getFinishedButNotSyncedTasks(userId: String): List<InspectionTask> = dao.getFinishedButNotSyncedTasks(userId)
 
     /**
      * 更新任务的同步状态。
@@ -86,11 +88,45 @@ class InspectionRepository(private val dao: InspectionDao) {
     }
 
     /**
+     * 根据 ID 获取特定巡检任务详情。
+     * 用于断点续传时恢复任务现场 (Checkpoint)，读取已保存的里程和时长。
+     *
+     * @param taskId 任务 UUID
+     * @return [InspectionTask] 实体，如果找不到则返回 null
+     */
+    suspend fun getTaskById(taskId: String): InspectionTask? {
+        return dao.getTaskById(taskId)
+    }
+
+    /**
      * 获取所有历史巡检任务列表。
      *
+     * @param userId 当前用户 ID
      * @return [Flow] 数据流。当数据库新增任务或状态改变时，UI 会自动刷新。
      */
-    fun getAllTasks(): Flow<List<InspectionTask>> = dao.getAllTasks()
+    fun getAllTasks(userId: String): Flow<List<InspectionTask>> = dao.getAllTasks(userId)
+
+    /**
+     * 保存任务进度缓存
+     */
+    suspend fun saveTaskCheckpoint(taskId: String, distance: Float, duration: Long) {
+        dao.updateTaskCheckpoint(taskId, distance, duration)
+    }
+
+    /**
+     * 获取任务的恢复状态数据 (用于注入前端)。
+     *
+     * @param taskId 任务 ID
+     * @return 包含 distance, seconds, isPaused 等字段的 Map
+     */
+    suspend fun getTaskState(taskId: String): Map<String, Any> {
+        val task = dao.getTaskById(taskId) ?: return emptyMap()
+
+        return mapOf(
+            "distance" to task.currentDistance,
+            "seconds" to task.currentDuration
+        )
+    }
 
     /**
      * 保存一条巡检记录（照片及位置信息）。
@@ -299,6 +335,41 @@ class InspectionRepository(private val dao: InspectionDao) {
         // 清除本地凭证
        TokenManager.clearTokens()
     }
+
+    // =========================================================================
+    // Region: 删除任务相关逻辑
+    // =========================================================================
+
+    /**
+     * [UI 调用] 标记任务为删除状态。
+     * 这会立即从 UI 列表中移除该任务，并触发后台同步删除。
+     */
+    suspend fun markTaskForDeletion(taskId: String) {
+        dao.markTaskAsDeleted(taskId)
+    }
+
+    /**
+     * [Worker 调用] 获取所有待同步删除的任务。
+     */
+    suspend fun getPendingDeleteTasks(): List<InspectionTask> {
+        return dao.getPendingDeleteTasks()
+    }
+
+    /**
+     * [Worker 调用] 物理删除任务。
+     * 当服务器确认删除（或软删除）成功后，本地彻底清除数据以释放空间。
+     */
+    suspend fun finalizeDeletion(taskId: String) {
+        val filePaths = dao.getLocalPathsByTaskId(taskId)
+
+        // 2. 执行数据库物理删除
+        dao.deleteTask(taskId)
+
+        // 3. 清理图片
+        if (filePaths.isNotEmpty()) {
+            deleteLocalPictures(filePaths)
+        }
+    }
 }
 
 /**
@@ -332,6 +403,40 @@ private fun RecordDto.toEntity(): InspectionRecord {
         captureTime = this.captureTime,
         latitude = this.rawLat,
         longitude = this.rawLng,
-        address = this.address
+        address = this.address,
+        iri = this.iri,
+        pavementDistress = this.pavementDistress
     )
+}
+
+/**
+ * 辅助方法：批量删除物理文件
+ * 复用 clearExpiredFiles 中的路径清洗逻辑
+ */
+private fun deleteLocalPictures(paths: List<String>) {
+    var deletedCount = 0
+    for (rawPath in paths) {
+        try {
+            // 清洗路径：移除 file:// 前缀
+            val normalizedPath = rawPath
+                .replaceFirst(Regex("^file:///?"), "/")
+                .replaceFirst(Regex("^content://.*"), "") // content:// 无法直接通过 File 删除，跳过
+
+            if (normalizedPath.isNotEmpty() && normalizedPath.startsWith("/")) {
+                val file = File(normalizedPath)
+                if (file.exists()) {
+                    if (file.delete()) {
+                        deletedCount++
+                    } else {
+                        android.util.Log.w("InspectionRepo", "文件删除失败 (权限或占用): $normalizedPath")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("InspectionRepo", "清理文件异常: ${e.message}")
+        }
+    }
+    if (deletedCount > 0) {
+        android.util.Log.i("InspectionRepo", "已清理任务关联图片: $deletedCount 张")
+    }
 }

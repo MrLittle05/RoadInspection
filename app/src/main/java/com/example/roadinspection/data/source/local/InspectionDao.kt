@@ -42,8 +42,8 @@ interface InspectionDao {
      *
      * @return [Flow] 数据流。当数据库发生变更时，UI 会自动接收到最新的列表。
      */
-    @Query("SELECT * FROM inspection_tasks ORDER BY start_time DESC")
-    fun getAllTasks(): Flow<List<InspectionTask>>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND sync_state != -1 ORDER BY start_time DESC")
+    fun getAllTasks(userId: String): Flow<List<InspectionTask>>
 
     /**
      * 根据 ID 获取单个任务详情。
@@ -59,8 +59,8 @@ interface InspectionDao {
      *
      * @return 待同步到服务器的任物列表
      */
-    @Query("SELECT * FROM inspection_tasks WHERE sync_state = 0")
-    suspend fun getUnsyncedTasks(): List<InspectionTask>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND sync_state = 0")
+    suspend fun getUnsyncedTasks(userId: String): List<InspectionTask>
 
     /**
      * 更新任务同步状态 (0 -> 1, 或 1 -> 2)
@@ -72,12 +72,33 @@ interface InspectionDao {
     suspend fun updateTaskSyncState(taskId: String, newState: Int)
 
     /**
-     * 查出本地已停止，但服务器还不知道的任务
+     * 查出当前用户本地已停止，但服务器还不知道的任务
      *
      * @return 待更新停止时间及同步状态的任务列表
      */
-    @Query("SELECT * FROM inspection_tasks WHERE is_finished = 1 AND sync_state = 1")
-    suspend fun getFinishedButNotSyncedTasks(): List<InspectionTask>
+    @Query("SELECT * FROM inspection_tasks WHERE inspector_id = :userId AND is_finished = 1 AND sync_state = 1")
+    suspend fun getFinishedButNotSyncedTasks(userId: String): List<InspectionTask>
+
+    /**
+     * 更新任务进度缓存 (里程 + 时长)。
+     * 用于“暂停”或“退出”时保存现场，以便下次恢复。
+     */
+    @Query("UPDATE inspection_tasks SET current_distance = :distance, current_duration = :duration WHERE task_id = :taskId")
+    suspend fun updateTaskCheckpoint(taskId: String, distance: Float, duration: Long)
+
+    /**
+     * 标记任务状态为“待删除”。
+     * 用于 UI 立即响应，等待后台同步。
+     */
+    @Query("UPDATE inspection_tasks SET sync_state = -1 WHERE task_id = :taskId")
+    suspend fun markTaskAsDeleted(taskId: String)
+
+    /**
+     * 获取所有标记为“待删除”的任务
+     * 用于后台同步。
+     */
+    @Query("SELECT * FROM inspection_tasks WHERE sync_state = -1")
+    suspend fun getPendingDeleteTasks(): List<InspectionTask>
 
     // -------------------------------------------------------------------------
     // Region: 巡检记录管理 (InspectionRecord)
@@ -114,6 +135,13 @@ interface InspectionDao {
      */
     @Query("SELECT * FROM inspection_records WHERE task_id = :taskId AND sync_status = :status ORDER BY capture_time ASC")
     fun getRecordsByTaskAndStatus(taskId: String, status: Int): Flow<List<InspectionRecord>>
+
+    /**
+     * 获取指定任务下所有非空的本地文件路径。
+     * 用于在物理删除任务前，清理手机存储中的图片文件。
+     */
+    @Query("SELECT local_path FROM inspection_records WHERE task_id = :taskId AND local_path != ''")
+    suspend fun getLocalPathsByTaskId(taskId: String): List<String>
 
     // -------------------------------------------------------------------------
     // Region: 后台同步专用 (WorkManager)
@@ -260,9 +288,25 @@ interface InspectionDao {
             true
         }
 
+        val finalTasksToSave = safeToUpdateTasks.map { netTask ->
+            // 尝试获取本地记录
+            val localTask = getTaskById(netTask.taskId)
+
+            if (localTask != null) {
+                // 如果本地存在，继承本地的缓存字段
+                netTask.copy(
+                    currentDistance = localTask.currentDistance,
+                    currentDuration = localTask.currentDuration,
+                    // 如果未来有其他本地独有字段，也要在这里 copy
+                )
+            } else {
+                netTask
+            }
+        }
+
         // 3. 批量写入
-        if (safeToUpdateTasks.isNotEmpty()) {
-            insertOrUpdateTasks(safeToUpdateTasks)
+        if (finalTasksToSave.isNotEmpty()) {
+            insertOrUpdateTasks(finalTasksToSave)
         }
     }
 
@@ -282,10 +326,23 @@ interface InspectionDao {
         // 1. 获取本地未同步列表 (sync_status != 2)
         val unsyncedIds = getUnsyncedRecordIds(taskId).toHashSet()
 
-        // 2. 内存过滤：剔除掉那些本地还没上传的数据
-        // 逻辑：如果网络数据里的 ID 在 dirtyIds 里，说明本地有未提交的修改，跳过网络版，保留本地版。
-        val recordsToSave = networkRecords.filter { netRecord ->
-            !unsyncedIds.contains(netRecord.recordId)
+        val localPaths = getLocalPathMap(taskId).associate { it.recordId to it.localPath }
+
+        val recordsToSave = networkRecords.mapNotNull { netRecord ->
+            val id = netRecord.recordId
+
+            when {
+                // 情况 A: 本地有未上传修改 (sync_status != 2) -> 跳过网络版，保护本地版
+                unsyncedIds.contains(id) -> null
+
+                // 情况 B: 本地已同步 (sync_status = 2)，但有物理文件 -> 保留本地路径
+                localPaths.containsKey(id) -> {
+                    netRecord.copy(localPath = localPaths[id]!!)
+                }
+
+                // 情况 C: 纯新数据或本地已清理 -> 直接使用网络版 (localPath 为 "")
+                else -> netRecord
+            }
         }
 
         // 3. 批量写入
@@ -307,4 +364,11 @@ interface InspectionDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateRecords(records: List<InspectionRecord>)
+
+    /**
+     * 辅助查询：获取指定任务下所有记录的本地路径映射。
+     * 返回 record_id 和 local_path，减少内存消耗。
+     */
+    @Query("SELECT record_id, local_path FROM inspection_records WHERE task_id = :taskId AND local_path != ''")
+    suspend fun getLocalPathMap(taskId: String): List<LocalPathTuple>
 }

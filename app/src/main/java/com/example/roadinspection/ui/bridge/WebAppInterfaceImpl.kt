@@ -14,7 +14,9 @@ import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.domain.inspection.InspectionManager
 import com.example.roadinspection.ui.screen.inspection.InspectionActivity
 import com.example.roadinspection.utils.invokeJsCallback
+import com.example.roadinspection.worker.WorkManagerConfig
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -91,38 +93,77 @@ class AndroidNativeApiImpl(
     }
 
     @JavascriptInterface
-    override fun clearTokens() {
-        Log.d(TAG, "JS 请求清除 Token")
-        TokenManager.clearTokens()
-    }
-
-    @JavascriptInterface
-    override fun getAccessToken(): String {
-        return TokenManager.accessToken ?: ""
-    }
-
-    @JavascriptInterface
-    override fun startInspectionActivity(url: String) {
-        Log.d(TAG, "JS请求跳转: $url")
+    override fun startInspectionActivity(url: String, resumeTaskId: String?) {
+        Log.d(TAG, "JS请求跳转: $url, 恢复任务: $resumeTaskId")
         // 防止 JS 传入 ./inspection.html 或 /inspection.html 导致路径拼接错误
         val cleanUrl = url.removePrefix("./").removePrefix("/")
 
         val intent = Intent(context, InspectionActivity::class.java).apply {
             // 拼接完整 file 协议路径
             putExtra("TARGET_URL", "file:///android_asset/$cleanUrl")
+            if (!resumeTaskId.isNullOrEmpty()) {
+                putExtra("RESUME_TASK_ID", resumeTaskId)
+            }
         }
         context.startActivity(intent)
     }
 
     @JavascriptInterface
     override fun startInspection(title: String?, currentUserId: String) {
-        inspectionManager?.startInspection(title, currentUserId)
-            ?: showToast("错误：当前页面不支持开始巡检")
+        if (inspectionManager == null) {
+            Log.w(TAG, "startInspection 调用失败: Manager 为空")
+            showToast("错误：当前页面不支持开始巡检")
+            return
+        }
+        inspectionManager.startInspection(title, currentUserId)
+    }
+
+    @JavascriptInterface
+    override fun pauseInspection() {
+        if (inspectionManager == null) {
+            Log.w(TAG, "pauseInspection 调用失败: Manager 为空")
+            showToast("错误：当前页面不支持暂停巡检")
+            return
+        }
+        Log.d(TAG, "JS 请求暂停巡检")
+        inspectionManager.pauseInspection()
+    }
+
+    @JavascriptInterface
+    override fun resumeInspection() {
+        if (inspectionManager == null) {
+            Log.w(TAG, "resumeInspection 调用失败: Manager 为空")
+            showToast("错误：当前页面不支持恢复巡检")
+            return
+        }
+        Log.d(TAG, "JS 请求恢复巡检")
+        inspectionManager.resumeInspection()
     }
 
     @JavascriptInterface
     override fun stopInspection() {
         inspectionManager?.stopInspection()
+    }
+
+    @JavascriptInterface
+    override fun stopInspectionActivity() {
+        Log.d(TAG, "JS 请求关闭巡检页面")
+        if (context is InspectionActivity) {
+            context.finish()
+        } else {
+            Log.w(TAG, "stopInspectionActivity 失败: Context 不是 Activity")
+        }
+    }
+
+    @JavascriptInterface
+    override fun saveInspectionState() {
+
+        if (inspectionManager == null) {
+            Log.w(TAG, "saveInspectionState 失败: Manager 为空")
+            showToast("错误：当前页面不支持保存巡检状态")
+            return
+        }
+        inspectionManager.saveCheckpoint()
     }
 
     @JavascriptInterface
@@ -171,7 +212,7 @@ class AndroidNativeApiImpl(
                 // ---------------------------------------------------------
                 // 启动一个子协程专门负责监听数据库变化
                 launch {
-                    repository.getAllTasks()
+                    repository.getAllTasks(userId)
                         // 仅当数据内容发生实质变化时才通知，避免频繁刷新 UI
                         // 注意：InspectionTask 需要实现 equals/hashCode
                         // .distinctUntilChanged()
@@ -214,6 +255,10 @@ class AndroidNativeApiImpl(
                         .catch { e -> handleException("fetchRecordsFlow", "onRecordsReceived", e as Exception) }
                         .collect { records ->
                             val response = ApiResponse.success(records)
+                            Log.d(TAG, "fetchRecordsFlow: $response")
+                            val gson = GsonBuilder()
+                                .serializeNulls() // 输出 null 字段 (默认为不输出)
+                                .create()
                             webViewRef.get()?.invokeJsCallback("onRecordsReceived", gson.toJson(response))
                         }
                 }
@@ -223,6 +268,24 @@ class AndroidNativeApiImpl(
 
             } catch (e: Exception) {
                 Log.w(TAG, "fetchRecords 流程异常: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    override fun deleteTask(taskId: String) {
+        Log.d(TAG, "JS 请求删除任务: $taskId")
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // 1. 标记数据库状态 (-1)，UI 会自动刷新消失
+                repository.markTaskForDeletion(taskId)
+
+                // 2. 调度独立的 DeleteWorker
+                WorkManagerConfig.scheduleDeletion(context)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "删除任务失败", e)
             }
         }
     }

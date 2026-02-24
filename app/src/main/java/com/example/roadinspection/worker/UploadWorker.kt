@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.data.source.remote.CreateTaskReq
 import com.example.roadinspection.data.source.remote.FinishTaskReq
 import com.example.roadinspection.data.source.remote.OssHelper
@@ -37,12 +38,17 @@ class UploadWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         Log.i(TAG, "🚀 后台同步任务开始执行...")
-
         try {
+            val userId = TokenManager.currentUserId
+            if (userId.isNullOrEmpty()) {
+                Log.e(TAG, "用户未登录，跳过同步")
+                return@withContext Result.failure()
+            }
+
             // ==============================================================
             // STEP 1: 同步新建的任务 (Create Task)
             // ==============================================================
-            val unsyncedTasks = repository.getUnsyncedTasks()
+            val unsyncedTasks = repository.getUnsyncedTasks(userId)
             for (task in unsyncedTasks) {
                 Log.d(TAG, "同步新任务: ${task.title} (${task.taskId})")
 
@@ -69,22 +75,38 @@ class UploadWorker(
             // ==============================================================
             // STEP 2: 同步图片记录 (Record Sync Loop)
             // ==============================================================
+
+            // 2.0 获取阿里云 STS Token
+            val stsResponse = api.getStsToken()
+
+            // 如果 Token 获取失败，整个批次都无法进行，直接 Retry
+            if (!stsResponse.isSuccess || stsResponse.data == null) {
+                Log.e(TAG, "❌ 无法获取 OSS 凭证，终止本次同步: ${stsResponse.message}")
+                // 返回 retry，等待网络好了下次再试
+                return@withContext Result.retry()
+            }
+
+            val credentials = stsResponse.data
+
+            // 定义一个熔断标志位。一旦发生网络严重错误，设为 true 并停止后续所有上传
+            var abortSync = false
+
             // 循环处理，直到没有待处理记录 (防止一次查太多 OOM)
             while (true) {
+                // 每次拉取新批次前，先检查是否需要熔断
+                if (abortSync) {
+                    Log.w(TAG, "⚠️ 检测到之前发生严重上传错误，停止后续批次处理")
+                    break
+                }
+
                 // 2.1 批量拉取未完成记录 (State != 2)
-                val records = repository.getBatchUnfinishedRecords(limit = 5) //
+                val records = repository.getBatchUnfinishedRecords(limit = 5)
                 if (records.isEmpty()) break // 没数据了，跳出循环
 
-                // 2.2 获取阿里云 STS Token (这就叫"一次获取，批量使用")
-                // 如果 Token 获取失败，整个批次都无法进行，直接 Retry
-                val stsResponse = api.getStsToken() //
-                if (!stsResponse.isSuccess || stsResponse.data == null) {
-                    Log.e(TAG, "STS Token 获取失败")
-                    return@withContext Result.retry()
-                }
-                val credentials = stsResponse.data
-
                 for (record in records) {
+                    // [新增] 循环内部检查：如果刚才报错了，不要再试这一批剩下的了，直接跳出
+                    if (abortSync) break
+
                     var currentRecord = record
 
                     // --- Phase A: 上传 OSS (State 0 -> 1) ---
@@ -106,8 +128,11 @@ class UploadWorker(
                             repository.updateRecord(currentRecord) //
                         } catch (e: Exception) {
                             Log.e(TAG, "OSS 上传异常: ${e.message}")
-                            // 单张图片失败不阻断整个循环，但标记 Worker 为 Retry
-                            continue
+                            // 关键点：捕获异常后，不要 continue！
+                            // 因为出现 Stream Closed 通常意味着连接池已废，继续试只会疯狂刷日志。
+                            // 动作：标记熔断 -> 跳出循环 -> 返回 Retry 让系统过会儿（比如1分钟后）再重启 Worker
+                            abortSync = true
+                            break
                         }
                     }
 
@@ -115,6 +140,7 @@ class UploadWorker(
                     val serverUrl = currentRecord.serverUrl
                     if (currentRecord.syncStatus == 1 && serverUrl != null) {
                         Log.d(TAG, "提交元数据到后端: ${currentRecord.recordId}")
+                        Log.d(TAG, "IRI: ${currentRecord.iri}")
                         val req = SubmitRecordReq(
                             recordId = currentRecord.recordId,
                             taskId = currentRecord.taskId,
@@ -141,7 +167,7 @@ class UploadWorker(
             // ==============================================================
             // STEP 3: 同步任务结束状态 (Task Finish)
             // ==============================================================
-            val tasksToFinish = repository.getFinishedButNotSyncedTasks()
+            val tasksToFinish = repository.getFinishedButNotSyncedTasks(userId)
             for (task in tasksToFinish) {
                 if (task.endTime != null) {
                     Log.d(TAG, "同步任务结束状态: ${task.taskId}")
@@ -158,6 +184,8 @@ class UploadWorker(
         } catch (e: Exception) {
             Log.e(TAG, "❌ Worker 执行异常", e)
             Result.retry() // 遇到任何未捕获异常（如网络超时），请求系统稍后重试
+        } finally {
+            OssHelper.shutdown()
         }
     }
 

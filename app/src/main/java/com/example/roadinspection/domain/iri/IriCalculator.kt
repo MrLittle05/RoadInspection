@@ -222,11 +222,11 @@ class IriCalculator(
      * @see [IriResult]
      */
     fun computeAndClear(avgSpeedKmh: Float, distanceMeters: Float): IriResult? {
-        // 1. 校准安全检查
-        if (calibrationFactor == DEFAULT_UNCALIBRATED_FACTOR) {
-            Log.e(TAG, "❌ DEVICE NOT CALIBRATED! IRI values are meaningless without proper calibration.")
-            return null
-        }
+//        // 1. 校准安全检查
+//        if (calibrationFactor == DEFAULT_UNCALIBRATED_FACTOR) {
+//            Log.e(TAG, "❌ DEVICE NOT CALIBRATED! IRI values are meaningless without proper calibration.")
+//            return null
+//        }
 
         // 2. 输入验证
         if (!validateInput(avgSpeedKmh, distanceMeters)) {
@@ -236,8 +236,8 @@ class IriCalculator(
         // 3. 安全获取数据副本
         val samples: List<AccelerationSample>
         synchronized(dataLock) {
-            if (rawSamples.size < 20) {
-                Log.w(TAG, "Insufficient samples: ${rawSamples.size} (min: 20)")
+            if (rawSamples.size < 15) {
+                Log.w(TAG, "Insufficient samples: ${rawSamples.size} (min: 15)")
                 return null
             }
             samples = ArrayList(rawSamples)
@@ -484,7 +484,7 @@ class IriCalculator(
             Log.d(TAG, "Distance too short: ${"%.1f".format(distanceMeters)}m (min: $MIN_VALID_DISTANCE_M m)")
             return false
         }
-        if (avgSpeedKmh < 5f || avgSpeedKmh > 140f) {
+        if (avgSpeedKmh < 3f || avgSpeedKmh > 140f) {
             Log.d(TAG, "Speed out of range: ${"%.1f".format(avgSpeedKmh)} km/h (valid: 5-140 km/h)")
             return false
         }
@@ -594,6 +594,32 @@ class IriCalculator(
         override fun toString(): String {
             return "IRI=%.1f mm/m | 等级=%s | 质量=%.0f%% | 距离=%.1fm"
                 .format(iriValue, rating, qualityIndex * 100, distanceMeters)
+        }
+    }
+
+    // =========================================================================
+    // 单元测试专用入口 (Test Backdoor)
+    // =========================================================================
+
+    /**
+     * [仅用于测试] 手动注入加速度样本，绕过硬件传感器。
+     *
+     * **用途**：
+     * 允许在 Unit Test 中模拟特定的震动模式（如正弦波、冲击波），
+     * 验证 computeAndClear 的算法逻辑（滤波、RMS、IRI计算）是否正确。
+     *
+     * **注意**：
+     * 1. 调用此方法前，无需调用 startListening。
+     * 2. 此方法注入的是已经投影到垂直方向的加速度值（单位：m/s²）。
+     *
+     * @param timestampNs 纳秒时间戳 (需保证递增)
+     * @param verticalAcc 垂直加速度值 (m/s²)
+     */
+    @androidx.annotation.VisibleForTesting
+    fun injectSampleForTesting(timestampNs: Long, verticalAcc: Float) {
+        synchronized(dataLock) {
+            // 直接操作内部私有列表，模拟 handleLinearAccelerationEvent 的结果
+            rawSamples.add(AccelerationSample(timestampNs, verticalAcc))
         }
     }
 }

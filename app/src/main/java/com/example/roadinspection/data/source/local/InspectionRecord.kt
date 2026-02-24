@@ -59,6 +59,7 @@ data class InspectionRecord(
     /**
      * 数据同步状态机。
      *
+     * - **-1 (DELETED)**: 已删除。
      * - **0 (PENDING)**: 待上传。照片仅保存在本地。
      * - **1 (IMAGE_UPLOADED)**: 图片已上传至 OSS，但业务数据尚未提交给后端。
      * - **2 (SYNCED)**: 已完成。图片和业务数据均已成功同步至服务器。
@@ -97,4 +98,10 @@ data class InspectionRecord(
      */
     @ColumnInfo(name = "pavement_distress")
     val pavementDistress: String? = null
+)
+
+
+data class LocalPathTuple(
+    @ColumnInfo(name = "record_id") val recordId: String,
+    @ColumnInfo(name = "local_path") val localPath: String
 )
