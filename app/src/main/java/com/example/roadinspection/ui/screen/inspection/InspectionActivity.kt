@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.view.OrientationEventListener
 import android.view.ScaleGestureDetector
+import android.view.Surface
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -196,6 +198,34 @@ fun CameraPreviewLayer(
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     val animatedZoom = remember { Animatable(zoomRatio) }
+
+    DisposableEffect(Unit) {
+        val orientationEventListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+
+                // 将 360 度的物理角度转换成系统能理解的 Surface 旋转常数
+                val rotation = when (orientation) {
+                    in 45..134 -> Surface.ROTATION_270  // 手机向右横放 (反向横屏)
+                    in 135..224 -> Surface.ROTATION_180 // 手机倒立
+                    in 225..314 -> Surface.ROTATION_90  // 手机向左横放 (正常横屏)
+                    else -> Surface.ROTATION_0          // 正常竖放
+                }
+
+                // 强制更新相机的目标旋转角度！
+                // 这样当你按下快门时，底层就会用这个真实的物理角度去纠正照片了。
+                imageCapture.targetRotation = rotation
+            }
+        }
+
+        // 开启监听
+        orientationEventListener.enable()
+
+        // 当组件销毁时，停止监听以节省电量
+        onDispose {
+            orientationEventListener.disable()
+        }
+    }
 
     LaunchedEffect(zoomRatio) {
         camera?.let { cam ->
