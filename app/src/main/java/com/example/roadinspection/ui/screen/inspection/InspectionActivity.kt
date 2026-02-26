@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.view.OrientationEventListener
 import android.view.ScaleGestureDetector
+import android.view.Surface
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -197,6 +199,34 @@ fun CameraPreviewLayer(
     var camera by remember { mutableStateOf<Camera?>(null) }
     val animatedZoom = remember { Animatable(zoomRatio) }
 
+    DisposableEffect(Unit) {
+        val orientationEventListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+
+                // 将 360 度的物理角度转换成系统能理解的 Surface 旋转常数
+                val rotation = when (orientation) {
+                    in 45..134 -> Surface.ROTATION_270  // 手机向右横放 (反向横屏)
+                    in 135..224 -> Surface.ROTATION_180 // 手机倒立
+                    in 225..314 -> Surface.ROTATION_90  // 手机向左横放 (正常横屏)
+                    else -> Surface.ROTATION_0          // 正常竖放
+                }
+
+                // 强制更新相机的目标旋转角度！
+                // 这样当你按下快门时，底层就会用这个真实的物理角度去纠正照片了。
+                imageCapture.targetRotation = rotation
+            }
+        }
+
+        // 开启监听
+        orientationEventListener.enable()
+
+        // 当组件销毁时，停止监听以节省电量
+        onDispose {
+            orientationEventListener.disable()
+        }
+    }
+
     LaunchedEffect(zoomRatio) {
         camera?.let { cam ->
             val zoomState = cam.cameraInfo.zoomState.value ?: return@let
@@ -240,6 +270,38 @@ fun CameraPreviewLayer(
                     }
                 })
                 previewView.setOnTouchListener { _, event -> scaleDetector.onTouchEvent(event); true }
+
+                // 🟢 核心增强：强制中心点连续自动对焦
+                // 使用 SurfaceOrientedMeteringPointFactory 构建一个相对坐标系 (1f x 1f)
+                val factory = androidx.camera.core.SurfaceOrientedMeteringPointFactory(1f, 1f)
+                // 坐标 (0.5f, 0.5f) 就是绝对的画面正中心
+                val centerPoint = factory.createPoint(0.5f, 0.5f)
+
+                // 创建对焦动作：FLAG_AF 代表自动对焦
+                // 注：不调用 setAutoCancelDuration，让它永久保持在这个点进行连续对焦
+                val action = androidx.camera.core.FocusMeteringAction.Builder(
+                    centerPoint,
+                    androidx.camera.core.FocusMeteringAction.FLAG_AF
+                ).build()
+
+                // 启动对焦
+                cam.cameraControl.startFocusAndMetering(action)
+
+                val exposureState = cam.cameraInfo.exposureState
+                if (exposureState.isExposureCompensationSupported) {
+                    val range = exposureState.exposureCompensationRange
+                    // 目标补偿值：-1 档位 (稍微压暗画面，保留高光细节)
+                    // 如果你想更暗一点测试，可以换成 -2，前提是 range.contains(-2)
+                    val targetExposure = -1
+
+                    if (range.contains(targetExposure)) {
+                        cam.cameraControl.setExposureCompensationIndex(targetExposure)
+                        Log.d("Camera", "☀️ 已将曝光补偿锁定为: $targetExposure")
+                    } else {
+                        Log.w("Camera", "☀️ 当前设备不支持 -1 档曝光补偿，支持范围: $range")
+                    }
+                }
+
             } catch (e: Exception) {
                 Log.e("Camera", "Bind failed", e)
             }

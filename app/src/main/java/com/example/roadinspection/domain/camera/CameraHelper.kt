@@ -11,6 +11,11 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -23,6 +28,9 @@ class CameraHelper(
 ) {
     // 创建一个单线程池用于后台处理图片压缩，避免阻塞主线程（UI线程）
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+
+    // 引入协程作用域，专门用于并发处理耗时的图片解码和 WebP 压缩任务
+    private val helperScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun takePhoto(
         isAuto: Boolean, // 此参数暂未使用，保留接口
@@ -42,37 +50,44 @@ class CameraHelper(
                 override fun onError(exc: ImageCaptureException) {
                     val msg = "Photo capture failed: ${exc.message}"
                     Log.e("CameraHelper", msg, exc)
-                    // 切回主线程回调错误信息
-                    ContextCompat.getMainExecutor(context).execute {
-                        onError(msg)
-                    }
+                    // 使用协程切回主线程
+                    helperScope.launch(Dispatchers.Main) { onError(msg) }
                 }
 
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
                     try {
-                        // 2. 将 ImageProxy 转为 Bitmap 并处理旋转
-                        val bitmap = imageProxyToBitmap(imageProxy)
+                        // 1. 【极速操作】：把画面数据立刻拷进内存 (ByteArray)
+                        val buffer = imageProxy.planes[0].buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
 
-                        // 3. 关闭 imageProxy，释放相机缓冲区的引用
+                        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+
+                        // 2. 【核心修复】：秒关 ImageProxy！把相机缓冲区还给底层，准备拍下一张！
                         imageProxy.close()
 
-                        if (bitmap != null) {
-                            // 4. 执行 WebP 压缩并保存到私有目录
-                            val savedUri = saveBitmapAsWebP(bitmap)
+                        // 3. 【异步卸载】：把这堆字节数据丢给 IO 线程池去慢慢解码和压缩
+                        helperScope.launch {
+                            try {
+                                // 这里的逻辑全部在后台多线程并发执行，不会卡住 cameraExecutor
+                                val bitmap = decodeAndRotateBitmap(bytes, rotationDegrees)
+                                if (bitmap != null) {
+                                    val savedUri = saveBitmapAsWebP(bitmap)
 
-                            // 成功：切回主线程返回结果
-                            ContextCompat.getMainExecutor(context).execute {
-                                onSuccess(savedUri)
+                                    // 成功：切回主线程返回结果
+                                    withContext(Dispatchers.Main) { onSuccess(savedUri) }
+                                } else {
+                                    withContext(Dispatchers.Main) { onError("Failed to decode bitmap") }
+                                }
+                            } catch (e: Exception) {
+                                Log.e("CameraHelper", "Process failed", e)
+                                withContext(Dispatchers.Main) { onError("Image processing failed: ${e.message}") }
                             }
-                        } else {
-                            throw Exception("Failed to decode bitmap")
                         }
                     } catch (e: Exception) {
-                        Log.e("CameraHelper", "Process failed", e)
-                        ContextCompat.getMainExecutor(context).execute {
-                            onError("Image processing failed: ${e.message}")
-                        }
-                        imageProxy.close() // 确保异常时也关闭
+                        Log.e("CameraHelper", "Extraction failed", e)
+                        imageProxy.close() // 兜底：发生异常也必须释放相机内存
+                        helperScope.launch(Dispatchers.Main) { onError("Extraction failed: ${e.message}") }
                     }
                 }
             }
@@ -80,27 +95,16 @@ class CameraHelper(
     }
 
     /**
-     * 将 ImageProxy 转换为 Bitmap，并根据 Exif 旋转角度修正方向
+     * 将 ByteArray 转换为 Bitmap 并根据 Exif 修正方向 (纯内存运算，丢在后台执行)
      */
-    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-
-        // 解码为原始 Bitmap
+    private fun decodeAndRotateBitmap(bytes: ByteArray, rotationDegrees: Int): Bitmap? {
         val originalBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
 
-        // 获取旋转角度 (CameraX 会自动计算好需要的补偿角度)
-        val rotationDegrees = image.imageInfo.rotationDegrees
-
-        // 如果没有旋转，直接返回
         if (rotationDegrees == 0) return originalBitmap
 
-        // 创建矩阵进行旋转
         val matrix = Matrix()
         matrix.postRotate(rotationDegrees.toFloat())
 
-        // 生成旋转后的新 Bitmap
         return Bitmap.createBitmap(
             originalBitmap,
             0, 0,
@@ -111,11 +115,9 @@ class CameraHelper(
     }
 
     /**
-     * 将 Bitmap 压缩为 WebP 并保存到应用私有目录
+     * 将 Bitmap 压缩为 WebP 并保存 (高耗时 I/O 操作，丢在后台执行)
      */
     private fun saveBitmapAsWebP(bitmap: Bitmap): Uri {
-        // 1. 准备文件：应用私有目录 /files/Pictures/RoadInspection
-        // 这种路径卸载 App 后会被删除，且不需要用户额外授权
         val storageDir = File(context.getExternalFilesDir(null), "Pictures/RoadInspection")
         if (!storageDir.exists()) {
             storageDir.mkdirs()
@@ -126,21 +128,17 @@ class CameraHelper(
 
         val photoFile = File(storageDir, fileName)
 
-        // 2. 选择 WebP 格式 (适配 Android 版本)
         val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Bitmap.CompressFormat.WEBP_LOSSY // Android 11+ 明确指定有损压缩
+            Bitmap.CompressFormat.WEBP_LOSSY
         } else {
             @Suppress("DEPRECATION")
-            Bitmap.CompressFormat.WEBP // 旧版本
+            Bitmap.CompressFormat.WEBP
         }
 
-        // 3. 写入文件流
         FileOutputStream(photoFile).use { stream ->
-            // 质量 90%
             bitmap.compress(format, 90, stream)
         }
 
-        // 4. 返回文件的 Uri
         return Uri.fromFile(photoFile)
     }
 }
