@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.roadinspection.data.repository.InspectionRepository
 import com.example.roadinspection.data.source.local.AppDatabase
+import com.example.roadinspection.data.source.local.StsCacheManager
 import com.example.roadinspection.data.source.local.TokenManager
 import com.example.roadinspection.data.source.remote.CreateTaskReq
 import com.example.roadinspection.data.source.remote.FinishTaskReq
@@ -76,17 +77,29 @@ class UploadWorker(
             // STEP 2: 同步图片记录 (Record Sync Loop)
             // ==============================================================
 
-            // 2.0 获取阿里云 STS Token
-            val stsResponse = api.getStsToken()
+            // 2.0 智能获取阿里云 STS Token
+            if (!StsCacheManager.isValid()) {
+                Log.d(TAG, "STS Token 不存在或已过期，向后端重新请求...")
+                val stsResponse = api.getStsToken()
 
-            // 如果 Token 获取失败，整个批次都无法进行，直接 Retry
-            if (!stsResponse.isSuccess || stsResponse.data == null) {
-                Log.e(TAG, "❌ 无法获取 OSS 凭证，终止本次同步: ${stsResponse.message}")
-                // 返回 retry，等待网络好了下次再试
-                return@withContext Result.retry()
+                // 如果 Token 获取失败，整个批次都无法进行，直接 Retry
+                if (!stsResponse.isSuccess || stsResponse.data == null) {
+                    Log.e(TAG, "❌ 无法获取 OSS 凭证，终止本次同步: ${stsResponse.message}")
+                    // 返回 retry，等待网络好了下次再试
+                    return@withContext Result.retry()
+                }
+
+                // expireInSeconds 由后端设置
+                StsCacheManager.save(stsResponse.data, 1800)
+            } else {
+                Log.d(TAG, "⚡ 命中本地 STS Token 缓存，直接复用")
             }
 
-            val credentials = stsResponse.data
+
+            val credentials = StsCacheManager.getCredentials() ?: run {
+                Log.e(TAG, "❌ 组装 STS 凭证异常，终止同步")
+                return@withContext Result.retry()
+            }
 
             // 定义一个熔断标志位。一旦发生网络严重错误，设为 true 并停止后续所有上传
             var abortSync = false
@@ -159,6 +172,13 @@ class UploadWorker(
                             repository.updateRecord(currentRecord.copy(syncStatus = 2))
                         } else {
                             Log.w(TAG, "元数据提交失败: ${res.message}")
+
+                            // 如果是限流，或者服务器 500 崩溃，立即熔断！不要再白费力气了
+                            if (res.code == 429 || res.code >= 500) {
+                                Log.w(TAG, "触发后端限流或服务异常，触发熔断，等待系统稍后重试")
+                                abortSync = true
+                                break
+                            }
                         }
                     }
                 }

@@ -1,5 +1,7 @@
 package com.example.roadinspection.domain.capture
 
+import java.math.BigDecimal
+import java.math.RoundingMode
 import android.content.Context
 import android.location.Location
 import android.net.Uri
@@ -198,7 +200,7 @@ class CaptureController(
                         latitude = location.latitude,
                         longitude = location.longitude,
                         address = addressStr.takeUnless { it == "未知路段 (网络查询失败)" },
-                        iri = iriResult?.iriValue?.toDouble() ?: 0.0
+                        iri = (iriResult?.iriValue?.toDouble() ?: 0.0).round(2)
                     )
 
                     repository.saveRecord(record)
@@ -233,7 +235,7 @@ class CaptureController(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     address = "手动触发",
-                    iri = 0.0
+                    iri = 0.00
                 )
                 repository.saveRecord(record)
                 onImageSaved(uri)
@@ -262,5 +264,9 @@ class CaptureController(
             }
         }
         return 0f
+    }
+
+    private fun Double.round(decimals: Int): Double {
+        return BigDecimal(this).setScale(decimals, RoundingMode.HALF_UP).toDouble()
     }
 }

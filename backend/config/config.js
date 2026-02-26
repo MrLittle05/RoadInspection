@@ -11,15 +11,15 @@
 
 // 构建 MongoDB 连接字符串
 // 注意：生产环境建议对 username/password 进行 URL 编码防止特殊字符导致解析错误
-const mongoUrl = `mongodb+srv://${process.env.MONGO_USERNAME}:${process.env.MONGO_PASSWORD}@lis464.reywwyg.mongodb.net/road_inspection`;
+const mongoUrl = `mongodb+srv://${process.env.MONGO_USERNAME}:${process.env.MONGO_PASSWORD}@lis464.reywwyg.mongodb.net/road_inspection`
 
 // [Debug] 检查环境变量读取状态
 // TODO: 上线生产环境前请移除或注释掉此类敏感信息的日志
-console.log("用户:", process.env.MONGO_USERNAME);
+console.log('用户:', process.env.MONGO_USERNAME)
 console.log(
-  "密码:",
-  process.env.MONGO_PASSWORD ? "****** (已读取)" : "❌ 未读取到 (undefined)"
-);
+  '密码:',
+  process.env.MONGO_PASSWORD ? '****** (已读取)' : '❌ 未读取到 (undefined)',
+)
 
 /**
  * @typedef {Object} AliyunConfig
@@ -44,7 +44,7 @@ const aliyun = {
 
   // Token 有效期 (秒)
   // 建议设置短一点 (如 900s/15min)，以此降低 Token 泄露后的风险
-  tokenExpireTime: 900,
-};
+  tokenExpireTime: 1800,
+}
 
-export { aliyun, mongoUrl };
+export { aliyun, mongoUrl }

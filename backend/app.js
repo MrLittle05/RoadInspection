@@ -18,7 +18,11 @@ import { connect } from 'mongoose'
 import { mongoUrl } from './config/config.js'
 import { Record, Task, User } from './model/models.js'
 import { getStsToken } from './utils/oss_helper.js'
-import { apiLimiter, authLimiter } from './utils/rateLimit.js'
+import {
+  apiLimiter,
+  authLimiter,
+  recordSubmitLimiter,
+} from './utils/rateLimit.js'
 import { generateTokens } from './utils/token.js'
 
 const app = new Koa()
@@ -560,7 +564,7 @@ router.post('/api/task/create', apiLimiter, async (ctx) => {
  * @param {number} longitude - 经度 (WGS84)
  * @param {string} address - 逆地理编码地址
  */
-router.post('/api/record/submit', apiLimiter, async (ctx) => {
+router.post('/api/record/submit', recordSubmitLimiter, async (ctx) => {
   const body = ctx.request.body
 
   // 日志作用：排查 "位置漂移" 问题。

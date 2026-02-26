@@ -24,3 +24,15 @@ export const apiLimiter = RateLimit.middleware({
     return ctx.request.ip
   },
 })
+
+export const recordSubmitLimiter = RateLimit.middleware({
+  interval: { min: 1 },
+  max: 200,
+  message: { code: 429, message: '批量同步速率达到上限，触发熔断保护' },
+  keyGenerator: async (ctx) => {
+    if (ctx.state.user && ctx.state.user.id) {
+      return ctx.state.user.id
+    }
+    return ctx.request.ip
+  },
+})
