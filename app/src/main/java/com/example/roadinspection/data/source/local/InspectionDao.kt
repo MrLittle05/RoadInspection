@@ -1,5 +1,6 @@
 package com.example.roadinspection.data.source.local
 
+import android.util.Log
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -255,7 +256,12 @@ interface InspectionDao {
      */
     @Transaction
     suspend fun smartMergeTasks(networkTasks: List<InspectionTask>) {
-        if (networkTasks.isEmpty()) return
+        if (networkTasks.isEmpty()) {
+            Log.d(TAG, "📡 后端返回空任务列表，合并结束")
+            return
+        }
+
+        Log.i(TAG, "🔄 开始合并后端任务，共获取到 ${networkTasks.size} 个")
 
         // 1. 绝对保护名单：本地新建未上传 (State=0)
         // 这些任务服务器根本不知道，必须死保
@@ -264,11 +270,14 @@ interface InspectionDao {
         // 2. 相对保护名单：本地已完成，但还没同步状态 (isFinished=1, State=1)
         val localFinishedIds = getFinishedButNotSyncedTaskIds().toHashSet()
 
+        Log.d(TAG, "🛡️ 本地保护名单: 绝对保护(State=0) ${strictlyLocalIds.size}个, 相对保护(已完成未同步) ${localFinishedIds.size}个")
+
         val safeToUpdateTasks = networkTasks.filter { netTask ->
             val taskId = netTask.taskId
 
             // 情况 A: 绝对保护，直接拒绝
             if (strictlyLocalIds.contains(taskId)) {
+                Log.w(TAG, "🚫 拦截覆盖: 任务 [$taskId] 属于本地新建未上传，强制保护")
                 return@filter false
             }
 
@@ -277,9 +286,11 @@ interface InspectionDao {
                 // 关键点：如果网络说“我也完成了(true)”，说明达成共识，允许更新！
                 // 这样可以将本地 syncState 顺便更新为 2 (Finalized)，且同步最新标题。
                 if (netTask.isFinished) {
+                    Log.d(TAG, "✅ 允许覆盖: 任务 [$taskId] 云端与本地均已完成，更新状态")
                     return@filter true
                 } else {
                     // 如果网络说“没完成(false)”，说明网络滞后，拒绝更新，保护本地完成状态。
+                    Log.w(TAG, "🚫 拦截覆盖: 任务 [$taskId] 本地已完成但云端滞后，强制保护")
                     return@filter false
                 }
             }
@@ -294,6 +305,7 @@ interface InspectionDao {
 
             if (localTask != null) {
                 // 如果本地存在，继承本地的缓存字段
+                Log.d(TAG, "🧩 继承本地缓存: 任务 [$netTask.taskId] 继承本地里程和时长")
                 netTask.copy(
                     currentDistance = localTask.currentDistance,
                     currentDuration = localTask.currentDuration,
@@ -306,8 +318,44 @@ interface InspectionDao {
 
         // 3. 批量写入
         if (finalTasksToSave.isNotEmpty()) {
-            insertOrUpdateTasks(finalTasksToSave)
+            Log.i(TAG, "💾 最终安全写入: 将 ${finalTasksToSave.size} 个任务执行 Upsert")
+            // insertOrUpdateTasks(finalTasksToSave)
+            safeUpsertTasks(finalTasksToSave)
+        } else {
+            Log.i(TAG, "⏭️ 没有需要更新的任务，全部被本地机制保护")
         }
+    }
+
+    // 尝试插入，遇到冲突则忽略 (绝对安全，不触发级联删除)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTasksIgnore(tasks: List<InspectionTask>): List<Long>
+
+    // 单纯的更新操作 (绝对安全，不触发级联删除)
+    @Update
+    suspend fun updateTasks(tasks: List<InspectionTask>)
+
+    // 安全的 Upsert 事务
+    @Transaction
+    suspend fun safeUpsertTasks(tasks: List<InspectionTask>) {
+        // 尝试插入，如果返回值为 -1，说明主键冲突（已存在）
+        val insertResults = insertTasksIgnore(tasks)
+
+        val tasksToUpdate = mutableListOf<InspectionTask>()
+        var insertedCount = 0
+        for (i in insertResults.indices) {
+            if (insertResults[i] == -1L) {
+                // 已存在的任务，加入到更新列表
+                tasksToUpdate.add(tasks[i])
+            } else {
+                insertedCount++
+            }
+        }
+
+        // 对已存在的任务执行 Update，绕过 REPLACE 陷阱
+        if (tasksToUpdate.isNotEmpty()) {
+            updateTasks(tasksToUpdate)
+        }
+        Log.d(TAG, "✅ Upsert 完毕: 新插入 $insertedCount 个任务，平滑更新 ${tasksToUpdate.size} 个任务 (安全避开级联删除陷阱)")
     }
 
     // -------------------------------------------------------------------------
@@ -321,32 +369,53 @@ interface InspectionDao {
      */
     @Transaction
     suspend fun smartMergeRecords(taskId: String, networkRecords: List<InspectionRecord>) {
-        if (networkRecords.isEmpty()) return
+        if (networkRecords.isEmpty()) {
+            Log.d(TAG, "📡 任务 [$taskId] 云端返回空记录，合并结束")
+            return
+        }
+
+        Log.i(TAG, "🔄 开始合并任务 [$taskId] 的记录，云端共 ${networkRecords.size} 条")
 
         // 1. 获取本地未同步列表 (sync_status != 2)
         val unsyncedIds = getUnsyncedRecordIds(taskId).toHashSet()
 
         val localPaths = getLocalPathMap(taskId).associate { it.recordId to it.localPath }
 
+        Log.d(TAG, "🛡️ 本地记录保护: 未上传记录 ${unsyncedIds.size} 条，拥有本地图片的记录 ${localPaths.size} 条")
+
+        var skipCount = 0
+        var keepLocalPathCount = 0
+        var pureNetworkCount = 0
+
         val recordsToSave = networkRecords.mapNotNull { netRecord ->
             val id = netRecord.recordId
 
             when {
                 // 情况 A: 本地有未上传修改 (sync_status != 2) -> 跳过网络版，保护本地版
-                unsyncedIds.contains(id) -> null
+                unsyncedIds.contains(id) -> {
+                    skipCount++
+                    null
+                }
 
                 // 情况 B: 本地已同步 (sync_status = 2)，但有物理文件 -> 保留本地路径
                 localPaths.containsKey(id) -> {
+                    keepLocalPathCount++
                     netRecord.copy(localPath = localPaths[id]!!)
                 }
 
                 // 情况 C: 纯新数据或本地已清理 -> 直接使用网络版 (localPath 为 "")
-                else -> netRecord
+                else -> {
+                    pureNetworkCount++
+                    netRecord
+                }
             }
         }
 
+        Log.d(TAG, "📊 合并决策统计: 保护本地跳过 $skipCount 条，保留本地路径 $keepLocalPathCount 条，纯网络覆盖 $pureNetworkCount 条")
+
         // 3. 批量写入
         if (recordsToSave.isNotEmpty()) {
+            Log.i(TAG, "💾 最终写入: 保存 ${recordsToSave.size} 条记录到数据库")
             insertOrUpdateRecords(recordsToSave)
         }
     }
@@ -371,4 +440,9 @@ interface InspectionDao {
      */
     @Query("SELECT record_id, local_path FROM inspection_records WHERE task_id = :taskId AND local_path != ''")
     suspend fun getLocalPathMap(taskId: String): List<LocalPathTuple>
+
+    companion object {
+        private const val TAG = "InspectionDao"
+    }
 }
+

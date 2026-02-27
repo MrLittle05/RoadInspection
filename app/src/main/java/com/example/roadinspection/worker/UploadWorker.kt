@@ -91,6 +91,7 @@ class UploadWorker(
 
                 // expireInSeconds 由后端设置
                 StsCacheManager.save(stsResponse.data, 1800)
+                Log.i(TAG, "✅ STS Token 获取成功，保存到本地缓存: ${stsResponse.data}")
             } else {
                 Log.d(TAG, "⚡ 命中本地 STS Token 缓存，直接复用")
             }
@@ -140,7 +141,7 @@ class UploadWorker(
                             )
                             repository.updateRecord(currentRecord) //
                         } catch (e: Exception) {
-                            Log.e(TAG, "OSS 上传异常: ${e.message}")
+                            Log.e(TAG, "OSS 上传异常: $e")
                             // 关键点：捕获异常后，不要 continue！
                             // 因为出现 Stream Closed 通常意味着连接池已废，继续试只会疯狂刷日志。
                             // 动作：标记熔断 -> 跳出循环 -> 返回 Retry 让系统过会儿（比如1分钟后）再重启 Worker
@@ -190,6 +191,12 @@ class UploadWorker(
             val tasksToFinish = repository.getFinishedButNotSyncedTasks(userId)
             for (task in tasksToFinish) {
                 if (task.endTime != null) {
+                    val hasUnsynced = repository.hasUnsyncedRecords(task.taskId)
+                    if (hasUnsynced) {
+                        Log.w(TAG, "🚧 任务 [${task.taskId}] 还有未同步的记录，暂不更新任务状态为 2，等待下一轮")
+                        continue
+                    }
+
                     Log.d(TAG, "同步任务结束状态: ${task.taskId}")
                     val res = api.finishTask(FinishTaskReq(task.taskId, task.endTime))
                     if (res.isSuccess) {

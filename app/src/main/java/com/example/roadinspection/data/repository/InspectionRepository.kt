@@ -1,5 +1,6 @@
 package com.example.roadinspection.data.repository
 
+import android.util.Log
 import com.example.roadinspection.data.source.local.AppDatabase
 import com.example.roadinspection.data.source.local.InspectionDao
 import com.example.roadinspection.data.source.local.InspectionRecord
@@ -260,18 +261,27 @@ class InspectionRepository(private val dao: InspectionDao) {
      * @throws Exception 网络请求失败时抛出，由调用方捕获日志，不影响本地数据显示。
      */
     suspend fun syncTasksFromNetwork(userId: String) {
-        // 1. 发起网络请求
-        val response = api.fetchTasks(userId)
+        Log.d(TAG, "🌐 [API 请求] 准备拉取用户 [$userId] 的最新任务列表...")
+        try {
+            // 1. 发起网络请求
+            val response = api.fetchTasks(userId)
 
-        if (response.isSuccess && response.data != null) {
-            val networkTasks = response.data.map { it.toEntity() }
+            if (response.isSuccess && response.data != null) {
+                Log.i(TAG, "📥 [API 响应] 成功获取 ${response.data.size} 条任务数据，准备交由 DAO 智能合并")
+                val networkTasks = response.data.map { it.toEntity() }
 
-            // 2. 交给 DAO 进行事务级智能合并
-            // 性能优化：DAO 内部会过滤掉本地正在修改的任务
-            dao.smartMergeTasks(networkTasks)
-        } else {
-            throw RuntimeException("Sync tasks failed: ${response.message}")
+                // 2. 交给 DAO 进行事务级智能合并
+                // 性能优化：DAO 内部会过滤掉本地正在修改的任务
+                dao.smartMergeTasks(networkTasks)
+            } else {
+                Log.e(TAG, "❌ [API 响应] 任务拉取失败: ${response.message}")
+                throw RuntimeException("Sync tasks failed: ${response.message}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 [网络异常] syncTasksFromNetwork 崩溃: ${e.message}")
+            throw e // 抛给上层处理
         }
+
     }
 
     /**
@@ -281,22 +291,33 @@ class InspectionRepository(private val dao: InspectionDao) {
      * UI 调用此方法时，不会阻塞当前显示，因为数据是通过 Flow 更新的。
      */
     suspend fun syncRecordsFromNetwork(taskId: String) {
+        Log.d(TAG, "🌐 [API 请求] 准备拉取任务 [$taskId] 的详细记录...")
         try {
             // 1. 发起网络请求
             val response = api.fetchRecords(taskId)
 
             if (response.isSuccess && response.data != null) {
+                Log.i(TAG, "📥 [API 响应] 成功获取 ${response.data.size} 条记录数据，准备交由 DAO 智能合并")
                 val networkRecords = response.data.map { it.toEntity() }
 
                 // 2. 调用 DAO 进行智能合并
                 dao.smartMergeRecords(taskId, networkRecords)
-
-                // 合并完成后，Room 会自动通知 getRecordsByTask 的 Flow 发射新数据
+            } else {
+                Log.w(TAG, "⚠️ [API 响应] 记录拉取异常: ${response.message}")
             }
         } catch (e: Exception) {
             // 网络错误是预料之中的（如离线模式），打印日志即可，不要崩 UI
-            android.util.Log.w("InspectionRepo", "后台同步记录失败: ${e.message}")
-        }
+            Log.w(TAG, "📡 [网络或离线] 无法连接服务器同步记录，保留本地数据显示。原因: ${e.message}")        }
+    }
+
+    /**
+     * 检查指定任务是否还有未同步完成的记录
+     * @param taskId 任务 ID
+     * @return true 表示还有记录没传完，false 表示全部记录已传完（或没有记录）
+     */
+    suspend fun hasUnsyncedRecords(taskId: String): Boolean {
+        // 利用现有的 DAO 方法，只要返回的 List 不为空，就说明还没传完
+        return dao.getUnsyncedRecordIds(taskId).isNotEmpty()
     }
 
     /**
@@ -370,6 +391,10 @@ class InspectionRepository(private val dao: InspectionDao) {
             deleteLocalPictures(filePaths)
         }
     }
+
+    companion object {
+        private const val TAG = "InspectionRepo"
+    }
 }
 
 /**
@@ -428,7 +453,10 @@ private fun deleteLocalPictures(paths: List<String>) {
                     if (file.delete()) {
                         deletedCount++
                     } else {
-                        android.util.Log.w("InspectionRepo", "文件删除失败 (权限或占用): $normalizedPath")
+                        android.util.Log.w(
+                            "InspectionRepo",
+                            "文件删除失败 (权限或占用): $normalizedPath"
+                        )
                     }
                 }
             }

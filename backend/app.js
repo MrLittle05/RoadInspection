@@ -9,6 +9,7 @@
  * 3. 业务接口路由分发 (Routes)
  */
 
+import cors from '@koa/cors'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import Koa from 'koa'
@@ -31,6 +32,9 @@ const router = new Router()
 // ============================================================
 // 1. Global Middleware (全局中间件)
 // ============================================================
+
+// 挂载跨域中间件
+app.use(cors())
 
 /**
  * 全局请求日志中间件 (Access Logger)

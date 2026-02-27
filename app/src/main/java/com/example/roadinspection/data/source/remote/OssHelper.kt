@@ -128,17 +128,44 @@ object OssHelper {
             }
 
             override fun onFailure(request: PutObjectRequest?, clientEx: ClientException?, serviceEx: ServiceException?) {
-                val errorMsg = clientEx?.message ?: serviceEx?.rawMessage ?: "未知错误"
-                Log.e(TAG, "❌ 上传失败: $errorMsg")
+                // 1. 构建详尽的错误日志
+                val logBuilder = StringBuilder("❌ OSS 上传失败细节:")
 
-                // [新增] 关键逻辑：检测到流关闭或Socket错误，立即自杀重置
-                if (errorMsg.contains("Stream Closed", ignoreCase = true) ||
-                    errorMsg.contains("Socket", ignoreCase = true) ||
-                    errorMsg.contains("Connection", ignoreCase = true)) {
+                // 提取简短错误信息（用于后续的熔断判断）
+                val shortErrorMsg = clientEx?.message ?: serviceEx?.rawMessage ?: "未知异常"
+
+                if (clientEx != null) {
+                    logBuilder.append("\n  👉 [ClientException - 客户端网络或本地IO异常]")
+                    logBuilder.append("\n  - Message: ${clientEx.message}")
+                    // 打印完整的本地异常堆栈，这对排查 Stream Closed 或 OOM 非常有用
+                    Log.e(TAG, "ClientException 堆栈:", clientEx)
+                }
+
+                if (serviceEx != null) {
+                    logBuilder.append("\n  👉 [ServiceException - 阿里云服务端拒绝请求]")
+                    logBuilder.append("\n  - ErrorCode: ${serviceEx.errorCode}")   // 核心错误码，如 AccessDenied, InvalidBucketName
+                    logBuilder.append("\n  - RequestId: ${serviceEx.requestId}")   // 提工单必备
+                    logBuilder.append("\n  - HostId: ${serviceEx.hostId}")         // 访问的节点
+                    logBuilder.append("\n  - RawMessage: ${serviceEx.rawMessage}") // 原始报错 JSON
+                }
+
+                // 2. 打印终极详细日志
+                val finalErrorLog = logBuilder.toString()
+                Log.e(TAG, finalErrorLog)
+
+                // 3. 拦截特定网络错误，触发客户端重置
+                if (shortErrorMsg.contains("Stream Closed", ignoreCase = true) ||
+                    shortErrorMsg.contains("Socket", ignoreCase = true) ||
+                    shortErrorMsg.contains("Connection", ignoreCase = true) ||
+                    shortErrorMsg.contains("timeout", ignoreCase = true)) {
+                    Log.w(TAG, "🔌 识别到网络/流异常，触发 OSSClient 重置")
                     invalidateClient()
                 }
 
-                if (continuation.isActive) continuation.resumeWithException(Exception(errorMsg))
+                // 4. 将详细信息抛给 Worker 层
+                if (continuation.isActive) {
+                    continuation.resumeWithException(Exception(finalErrorLog))
+                }
             }
         })
 

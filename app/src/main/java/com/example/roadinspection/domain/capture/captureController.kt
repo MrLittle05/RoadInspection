@@ -200,7 +200,7 @@ class CaptureController(
                         latitude = location.latitude,
                         longitude = location.longitude,
                         address = addressStr.takeUnless { it == "未知路段 (网络查询失败)" },
-                        iri = (iriResult?.iriValue?.toDouble() ?: 0.0).round(2)
+                        iri = (iriResult?.iriValue?.toDouble() ?: -1.0).round(2)
                     )
 
                     repository.saveRecord(record)
@@ -235,7 +235,7 @@ class CaptureController(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     address = "手动触发",
-                    iri = 0.00
+                    iri = -1.00
                 )
                 repository.saveRecord(record)
                 onImageSaved(uri)
