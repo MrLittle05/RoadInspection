@@ -205,10 +205,13 @@ interface InspectionDao {
     @Query("""
         SELECT * FROM inspection_records 
         WHERE sync_status = 2 
-        AND local_path != '' 
+        AND local_path LIKE '%.webp' 
         AND capture_time < :expirationThreshold
     """)
     suspend fun getRecordsToClean(expirationThreshold: Long): List<InspectionRecord>
+
+    @Query("UPDATE inspection_records SET local_path = :newPath WHERE record_id = :recordId")
+    suspend fun updateRecordLocalPath(recordId: String, newPath: String)
 
     /**
      * 批量清除本地文件路径标记。

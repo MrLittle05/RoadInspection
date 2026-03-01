@@ -27,23 +27,41 @@ export const RecordItem: React.FC<RecordItemProps> = ({
   const hasDistress =
     record.pavementDistress && record.pavementDistress.length > 0
 
-  const imageSrc = React.useMemo(() => {
-    // 优先使用本地路径
+  const { originalSrc, thumbnailSrc } = React.useMemo(() => {
+    let orig = null
+    let thumb = null
+
     if (record.localPath && record.localPath.length > 0) {
-      // 如果是绝对路径且没有协议头，添加 file:// 前缀
-      if (
-        record.localPath.startsWith('/') &&
-        !record.localPath.startsWith('file://')
-      ) {
-        return `file://${record.localPath}`
+      // 統一加上 file:// 前綴
+      let path = record.localPath
+      if (path.startsWith('/') && !path.startsWith('file://')) {
+        path = `file://${path}`
       }
-      return record.localPath
+
+      if (path.endsWith('.webp')) {
+        // 1：本地原圖還在
+        orig = path
+        // 替換副檔名來取得本地縮圖路徑
+        const lastDotIndex = path.lastIndexOf('.')
+        thumb = path.substring(0, lastDotIndex) + '_thumb.jpg'
+      } else if (path.endsWith('_thumb.jpg')) {
+        // 狀態 2：被 CleanupWorker 清理過，本地只剩縮圖
+        thumb = path
+        orig = record.serverUrl || path
+      } else {
+        orig = path
+        thumb = path
+      }
+    } else if (record.serverUrl && record.serverUrl.length > 0) {
+      // 狀態 3：純雲端數據 (例如換手機登入，本地完全沒圖)
+      orig = record.serverUrl
+      // 加上阿里雲 OSS 動態縮圖參數
+      // m_fill,w_300,h_300：縮放並裁剪成 300x300 正方形
+      // quality,q_80：壓縮品質 80%
+      thumb = `${record.serverUrl}?x-oss-process=image/resize,m_fill,w_300,h_300/quality,q_80`
     }
-    // 其次使用服务端 URL
-    if (record.serverUrl && record.serverUrl.length > 0) {
-      return record.serverUrl
-    }
-    return null
+
+    return { originalSrc: orig, thumbnailSrc: thumb }
   }, [record.localPath, record.serverUrl])
 
   return (
@@ -53,12 +71,12 @@ export const RecordItem: React.FC<RecordItemProps> = ({
         className='relative w-24 h-24 flex-shrink-0 bg-slate-100 rounded-lg overflow-hidden cursor-zoom-in'
         onClick={(e) => {
           e.stopPropagation()
-          if (imageSrc) onImageClick(imageSrc)
+          if (originalSrc) onImageClick(originalSrc)
         }}
       >
-        {imageSrc ? (
+        {thumbnailSrc ? (
           <img
-            src={imageSrc}
+            src={thumbnailSrc}
             alt='现场照片'
             className='w-full h-full object-cover'
             loading='lazy'

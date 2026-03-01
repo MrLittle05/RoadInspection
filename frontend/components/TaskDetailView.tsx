@@ -1,6 +1,6 @@
 import { ArrowUpDown } from 'lucide-react'
-import React, { useMemo, useState } from 'react'
-import { Virtuoso } from 'react-virtuoso'
+import React, { useMemo, useRef, useState } from 'react'
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { InspectionRecord, InspectionTask } from '../types'
 import { PullToRefresh, RefreshResult } from './PullToRefresh'
 import { RecordItem } from './RecordItem'
@@ -24,6 +24,8 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   refreshResult,
 }) => {
   const [sortOrder, setSortOrder] = useState<'latest' | 'earliest'>('latest')
+
+  const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   // Derived stats
   const distressCount = records.filter(
@@ -67,6 +69,18 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
     }
   }
 
+  const handleChartClick = (recordId: number) => {
+    const targetIndex = sortedRecords.findIndex((r) => r.id === recordId)
+
+    if (targetIndex !== -1 && virtuosoRef.current) {
+      virtuosoRef.current.scrollToIndex({
+        index: targetIndex,
+        align: 'start',
+        behavior: 'smooth',
+      })
+    }
+  }
+
   return (
     <PullToRefresh
       onRefresh={onRefresh}
@@ -98,7 +112,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
           </div>
         </div>
 
-        <StatsChart records={records} />
+        <StatsChart records={records} onChartClick={handleChartClick} />
 
         <div className='flex items-center justify-between mb-3 mt-6'>
           <h2 className='font-bold text-slate-800'>巡检日志</h2>
@@ -116,6 +130,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
         </div>
 
         <Virtuoso
+          ref={virtuosoRef}
           useWindowScroll
           data={sortedRecords}
           itemContent={(index, record) => (

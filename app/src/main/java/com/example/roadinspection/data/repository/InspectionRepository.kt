@@ -197,57 +197,41 @@ class InspectionRepository(private val dao: InspectionDao) {
      */
     suspend fun clearExpiredFiles(retentionDays: Int): Int {
         val threshold = System.currentTimeMillis() - (retentionDays * 24 * 60 * 60 * 1000L)
-
-        // 获取需要清理图片文件的记录
         val records = dao.getRecordsToClean(threshold)
         if (records.isEmpty()) return 0
 
-        val cleanedIds = mutableListOf<String>()
         var deletedCount = 0
 
         records.forEach { record ->
             try {
-                var isPhysicallyDeleted = false
-
                 val normalizedPath = record.localPath
-                    .replaceFirst(Regex("^file:///?"), "/") // 处理 file:// 和 file:/// 两种变体
-                    .replaceFirst(Regex("^content://.*"), "") // 忽略 content:// (无法直接删除)
-
+                    .replaceFirst(Regex("^file:///?"), "/")
+                    .replaceFirst(Regex("^content://.*"), "")
 
                 if (normalizedPath.isNotEmpty() && normalizedPath.startsWith("/")) {
                     val file = File(normalizedPath)
+                    var isCleaned = false
+
                     if (file.exists()) {
-                        // 2. 尝试删除
                         if (file.delete()) {
                             deletedCount++
-                            isPhysicallyDeleted = true
-                        } else {
-                            // 删除失败（如权限问题），此时绝对不能更新数据库！
-                            // 留待下次任务重试，或者记录日志排查
-                            android.util.Log.w("InspectionRepo", "无法删除文件: $normalizedPath")
-                            isPhysicallyDeleted = false
+                            isCleaned = true
                         }
                     } else {
-                        // 文件本来就不存在（可能用户手动删了），视为清理成功
-                        isPhysicallyDeleted = true
+                        // 如果原图本来就不存在(可能被用户手动删了)，也视同清理成功
+                        isCleaned = true
+                    }
+
+                    // 文件清理后，把数据库记录更新为缩略图路径
+                    if (isCleaned) {
+                        val thumbPath = record.localPath.replace(".webp", "_thumb.jpg")
+                        dao.updateRecordLocalPath(record.recordId, thumbPath)
                     }
                 }
-
-                // 3. 只有确认物理文件已消失，才更新数据库
-                if (isPhysicallyDeleted) {
-                    cleanedIds.add(record.recordId)
-                }
-
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-
-        // 4. 批量更新数据库状态
-        if (cleanedIds.isNotEmpty()) {
-            dao.clearLocalPaths(cleanedIds)
-        }
-
         return deletedCount
     }
 

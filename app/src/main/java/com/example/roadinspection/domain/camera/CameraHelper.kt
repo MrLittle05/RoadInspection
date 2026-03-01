@@ -115,7 +115,8 @@ class CameraHelper(
     }
 
     /**
-     * 将 Bitmap 压缩为 WebP 并保存 (高耗时 I/O 操作，丢在后台执行)
+     * 将 Bitmap 压缩为 WebP 保存原图，同时使用 JPEG 极速生成一张极小尺寸的缩略图
+     * (高耗时 I/O 操作，已丢在 helperScope 后台执行)
      */
     private fun saveBitmapAsWebP(bitmap: Bitmap): Uri {
         val storageDir = File(context.getExternalFilesDir(null), "Pictures/RoadInspection")
@@ -123,11 +124,15 @@ class CameraHelper(
             storageDir.mkdirs()
         }
 
-        val fileName = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.CHINA)
-            .format(System.currentTimeMillis()) + ".webp"
+        // 1. 生成基础文件名 (不含后缀)
+        val baseFileName = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.CHINA)
+            .format(System.currentTimeMillis())
 
-        val photoFile = File(storageDir, fileName)
+        // 定义原图(WebP)和缩图(JPEG)的文件对象
+        val originalFile = File(storageDir, "$baseFileName.webp")
+        val thumbFile = File(storageDir, "${baseFileName}_thumb.jpg")
 
+        // 2. 保存高画质原图 (维持 WebP，节省大量存储空间)
         val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Bitmap.CompressFormat.WEBP_LOSSY
         } else {
@@ -135,10 +140,29 @@ class CameraHelper(
             Bitmap.CompressFormat.WEBP
         }
 
-        FileOutputStream(photoFile).use { stream ->
+        FileOutputStream(originalFile).use { stream ->
             bitmap.compress(format, 90, stream)
         }
 
-        return Uri.fromFile(photoFile)
+        // 3. 生成并保存极小尺寸的缩略图 (改用 JPEG，编码速度极快)
+        val targetWidth = 300
+        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+        val targetHeight = (targetWidth / aspectRatio).toInt()
+
+        // Android 原生内存缩放 API
+        val thumbBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+
+        FileOutputStream(thumbFile).use { stream ->
+            // 缩略图直接用 JPEG 格式，80 品质即可，瞬间完成
+            thumbBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+        }
+
+        // 释放缩图占用的内存 (防止连续拍照 OOM)
+        if (thumbBitmap != bitmap) {
+            thumbBitmap.recycle()
+        }
+
+        // 依然返回原图的 Uri 给调用方，保证数据库里存的 localPath 还是原图路径
+        return Uri.fromFile(originalFile)
     }
 }
